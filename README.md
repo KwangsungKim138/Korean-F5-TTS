@@ -218,6 +218,20 @@ f5-tts_finetune-gradio
 
 Read [training & finetuning guidance](src/f5_tts/train) for more instructions.
 
+### 3. Korean Dataset Preparation (KSS)
+
+To prepare the KSS dataset with the Korean Grapheme-to-Allophone tokenizer:
+
+1.  Place the KSS dataset in `data/KSS`. It should contain `wavs` directory (or subdirectories with wavs) and `transcript.v.1.4.txt`.
+2.  Run the preparation script:
+
+```bash
+python src/f5_tts/train/datasets/prepare_kss.py
+```
+
+This will create `data/KSS_kor_allophone` containing `raw.arrow`, `duration.json`, and `vocab.txt`.
+You can then configure your training to use this dataset and the `kor_allophone` tokenizer.
+
 
 ## [Evaluation](src/f5_tts/eval)
 
