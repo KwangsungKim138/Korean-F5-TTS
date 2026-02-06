@@ -220,27 +220,73 @@ Read [training & finetuning guidance](src/f5_tts/train) for more instructions.
 
 ### 3. Korean Dataset Preparation (KSS)
 
-To prepare the KSS dataset with the Korean Grapheme-to-Allophone tokenizer:
+To prepare the KSS dataset for different experimental settings:
 
-1.  Place the KSS dataset in `data/KSS`. It should contain `wavs` directory (or subdirectories with wavs) and `transcript.v.1.4.txt`.
-2.  Run the preparation script:
+1.  Place the KSS dataset in `data/KSS`. It should contain `wavs` directory and `transcript.v.1.4.txt`.
 
+**Option A: Proposed (Korean Allophone - Recommended)**
 ```bash
-python src/f5_tts/train/datasets/prepare_kss.py
+python src/f5_tts/train/datasets/prepare_kss_allophone.py
 ```
+Creates `data/KSS_kor_allophone`.
 
-This will create `data/KSS_kor_allophone` containing `raw.arrow`, `duration.json`, and `vocab.txt`.
-You can then configure your training to use this dataset and the `kor_allophone` tokenizer.
+**Option B: Baseline 1 (Korean Grapheme/Jamo)**
+```bash
+python src/f5_tts/train/datasets/prepare_kss_grapheme.py
+```
+Creates `data/KSS_kor_grapheme`.
+
+**Option C: Baseline 2 (Standard Phoneme)**
+```bash
+python src/f5_tts/train/datasets/prepare_kss_phoneme.py
+```
+Creates `data/KSS_kor_phoneme`.
 
 ### 4. Training on KSS
 
-To train on the prepared KSS dataset, use the provided configuration file:
+Run training with the corresponding configuration:
 
+**Proposed (Allophone)**
 ```bash
-accelerate launch src/f5_tts/train/train.py hydra.config_name=F5TTS_Base_train_KSS
+accelerate launch src/f5_tts/train/train.py --config-name F5TTS_Base_train_KSS_Allophone
 ```
 
-This uses `src/f5_tts/configs/F5TTS_Base_train_KSS.yaml` which is pre-configured for the KSS dataset and Korean allophone tokenizer.
+**Baseline 1 (Grapheme)**
+```bash
+accelerate launch src/f5_tts/train/train.py --config-name F5TTS_Base_train_KSS_Grapheme
+```
+
+**Baseline 2 (Phoneme)**
+```bash
+accelerate launch src/f5_tts/train/train.py --config-name F5TTS_Base_train_KSS_Phoneme
+```
+
+#### Troubleshooting & Tips
+
+**1. GPU Power Limit (Prevent Shutdown/Black Screen on RTX 3090)**
+If your system shuts down (black screen, 100% fan speed) during training, it's likely due to transient power spikes. Limit the GPU power usage:
+
+*   **Linux (Native):**
+    ```bash
+    sudo nvidia-smi -pl 260  # Limit to 260W (adjust as needed)
+    ```
+*   **Windows (WSL2 Host):**
+    Open PowerShell as Administrator and run:
+    ```powershell
+    nvidia-smi -pl 260
+    ```
+    *Note: If `nvidia-smi` fails on Windows, use MSI Afterburner to set Power Limit to ~75-80%.*
+
+**2. Weights & Biases (WandB) Logging**
+To visualize loss and training progress:
+1.  Sign up at [wandb.ai](https://wandb.ai).
+2.  Get your API key from User Settings.
+3.  Run `wandb login` in your terminal and paste the key.
+4.  Training logs will automatically appear on your WandB dashboard.
+
+**3. OOM (Out of Memory)**
+If you encounter CUDA OOM errors, reduce `batch_size_per_gpu` in the config file.
+Recommended for RTX 3090 (24GB): `9600` (frames).
 
 
 ## [Evaluation](src/f5_tts/eval)
