@@ -232,6 +232,16 @@ python src/f5_tts/train/datasets/prepare_kss.py
 This will create `data/KSS_kor_allophone` containing `raw.arrow`, `duration.json`, and `vocab.txt`.
 You can then configure your training to use this dataset and the `kor_allophone` tokenizer.
 
+### 4. Training on KSS
+
+To train on the prepared KSS dataset, use the provided configuration file:
+
+```bash
+accelerate launch src/f5_tts/train/train.py hydra.config_name=F5TTS_Base_train_KSS
+```
+
+This uses `src/f5_tts/configs/F5TTS_Base_train_KSS.yaml` which is pre-configured for the KSS dataset and Korean allophone tokenizer.
+
 
 ## [Evaluation](src/f5_tts/eval)
 
