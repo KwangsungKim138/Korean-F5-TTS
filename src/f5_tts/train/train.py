@@ -22,7 +22,7 @@ def main(model_cfg):
     mel_spec_type = model_cfg.model.mel_spec.mel_spec_type
 
     exp_name = f"{model_cfg.model.name}_{mel_spec_type}_{model_cfg.model.tokenizer}_{model_cfg.datasets.name}"
-    wandb_resume_id = None
+    wandb_resume_id = model_cfg.ckpts.get("wandb_resume_id", None)
 
     # set text tokenizer
     if tokenizer != "custom":
