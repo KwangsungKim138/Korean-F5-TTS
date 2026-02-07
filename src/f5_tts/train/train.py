@@ -53,7 +53,7 @@ def main(model_cfg):
         grad_accumulation_steps=model_cfg.optim.grad_accumulation_steps,
         max_grad_norm=model_cfg.optim.max_grad_norm,
         logger=model_cfg.ckpts.logger,
-        wandb_project="IS2026",
+        wandb_project=model_cfg.ckpts.get("wandb_project", "F5-TTS"),
         wandb_run_name=exp_name,
         wandb_resume_id=wandb_resume_id,
         last_per_updates=model_cfg.ckpts.last_per_updates,
