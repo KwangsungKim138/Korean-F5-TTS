@@ -1,0 +1,55 @@
+hydra:
+  run:
+    dir: ckpts/${model.name}_${model.mel_spec.mel_spec_type}_${model.tokenizer}_${datasets.name}_A100/${now:%Y-%m-%d}/${now:%H-%M-%S}
+
+datasets:
+  name: KSS  # dataset name
+  batch_size_per_gpu: 38400  # Optimized for A100 80GB (Replicating paper setting per GPU)
+  batch_size_type: frame  # frame | sample
+  max_samples: 256  # Increased for A100
+  num_workers: 8  # Increased for A100
+
+optim:
+  epochs: 5000  # Target for full convergence
+  learning_rate: 7.5e-5
+  num_warmup_updates: 2000  # warmup updates
+  grad_accumulation_steps: 1  # No accumulation needed
+  max_grad_norm: 1.0  # gradient clipping
+  bnb_optimizer: False  # use bnb 8bit AdamW optimizer or not
+
+model:
+  name: F5TTS_Base  # model name
+  tokenizer: kor_grapheme  # tokenizer type
+  tokenizer_path: null  # if 'custom' tokenizer, define the path want to use (should be vocab.txt)
+  backbone: DiT
+  arch:
+    dim: 1024
+    depth: 22
+    heads: 16
+    ff_mult: 2
+    text_dim: 512
+    text_mask_padding: False
+    conv_layers: 4
+    pe_attn_head: 1
+    attn_backend: flash_attn  # A100 supports Flash Attention 2
+    attn_mask_enabled: False
+    checkpoint_activations: False  # recompute activations and save memory for extra compute
+  mel_spec:
+    target_sample_rate: 24000
+    n_mel_channels: 100
+    hop_length: 256
+    win_length: 1024
+    n_fft: 1024
+    mel_spec_type: vocos  # vocos | bigvgan
+  vocoder:
+    is_local: False  # use local offline ckpt or not
+    local_path: null  # local vocoder path
+
+ckpts:
+  logger: wandb  # wandb | tensorboard | null
+  log_samples: True  # infer random sample per save checkpoint. wip, normal to fail with extra long samples
+  save_per_updates: 2000  # save checkpoint per updates
+  keep_last_n_checkpoints: 5  # Keep last 5 checkpoints
+  last_per_updates: 500  # save last checkpoint per updates
+  save_dir: ckpts/${model.name}_${model.mel_spec.mel_spec_type}_${model.tokenizer}_${datasets.name}_A100
+  wandb_project: Korean-F5-TTS-Comparison
