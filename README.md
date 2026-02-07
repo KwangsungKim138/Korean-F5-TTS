@@ -228,7 +228,7 @@ To prepare the KSS dataset for different experimental settings:
 ```bash
 python src/f5_tts/train/datasets/prepare_kss_allophone.py
 ```
-Creates `data/KSS_kor_allophone`.
+Creates `data/KSS_kor_allophone` and automatically generates `vocab.txt` based on the dataset content.
 
 **Option B: Baseline 1 (Korean Grapheme/Jamo)**
 ```bash
@@ -260,6 +260,8 @@ accelerate launch src/f5_tts/train/train.py --config-name F5TTS_Base_train_KSS_G
 ```bash
 accelerate launch src/f5_tts/train/train.py --config-name F5TTS_Base_train_KSS_Phoneme
 ```
+
+For detailed setup instructions in Korean (including environment setup and troubleshooting), please refer to [SETUP_GUIDE_KO.md](SETUP_GUIDE_KO.md).
 
 #### Troubleshooting & Tips
 
