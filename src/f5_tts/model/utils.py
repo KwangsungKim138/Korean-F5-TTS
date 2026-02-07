@@ -276,6 +276,50 @@ def convert_char_to_allophone(text_list: list[str]) -> list[list[str]]:
 
     return final_text_list
 
+def convert_char_to_grapheme(text_list: list[str]) -> list[list[str]]:
+    """
+    Convert text list to Korean Grapheme (Jamo) list (No G2P)
+    """
+    final_text_list = []
+    for text in text_list:
+        result = []
+        for char in text:
+            if char == ' ':
+                result.append(' ')
+            else:
+                # Decompose syllable
+                jamos = _syllable_to_phonemes(char)
+                # Filter out empty jongseong if any
+                result.extend([j for j in jamos if j])
+        
+        final_text_list.append(result)
+    return final_text_list
+
+def convert_char_to_phoneme(text_list: list[str]) -> list[list[str]]:
+    """
+    Convert text list to Korean Standard Phoneme list (G2P applied, No Allophone markers)
+    """
+    final_text_list = []
+    for text in text_list:
+        result = []
+        # 1. G2P
+        pronunciation = _text_to_pronunciation(text)
+        # 2. Eojeol split
+        eojeols = _pronunciation_to_eojeols(pronunciation)
+        
+        for eojeol in eojeols:
+            for syllable in eojeol:
+                # 3. Decompose
+                phonemes = _syllable_to_phonemes(syllable)
+                result.extend([p for p in phonemes if p])
+            result.append(' ')
+            
+        if result and result[-1] == ' ':
+            result.pop()
+            
+        final_text_list.append(result)
+    return final_text_list
+
 
 # convert char to pinyin
 

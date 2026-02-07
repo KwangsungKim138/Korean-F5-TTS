@@ -29,7 +29,13 @@ from transformers import pipeline
 from vocos import Vocos
 
 from f5_tts.model import CFM
-from f5_tts.model.utils import convert_char_to_pinyin, get_tokenizer
+from f5_tts.model.utils import (
+    convert_char_to_pinyin,
+    get_tokenizer,
+    convert_char_to_allophone,
+    convert_char_to_grapheme,
+    convert_char_to_phoneme,
+)
 
 
 _ref_audio_cache = {}
@@ -474,7 +480,33 @@ def infer_batch_process(
 
         # Prepare the text
         text_list = [ref_text + gen_text]
-        final_text_list = convert_char_to_pinyin(text_list)
+        
+        # Determine tokenizer based on vocab content
+        if hasattr(model_obj, "vocab_char_map") and model_obj.vocab_char_map is not None:
+            vocab = model_obj.vocab_char_map
+            
+            # 1. Allophone Check (Look for unique marker 'ⁱ')
+            if "ⁱ" in vocab:
+                print("[Tokenizer] Detected: Korean Allophone")
+                final_text_list = convert_char_to_allophone(text_list)
+                
+            # 2. Grapheme Check (Look for complex coda 'ㅄ' which only exists in raw Jamo)
+            elif "ㅄ" in vocab:
+                print("[Tokenizer] Detected: Korean Grapheme (Jamo)")
+                final_text_list = convert_char_to_grapheme(text_list)
+                
+            # 3. Phoneme Check (Look for basic Jamo 'ㄱ' but no complex coda)
+            elif "ㄱ" in vocab:
+                print("[Tokenizer] Detected: Korean Phoneme (Standard G2P)")
+                final_text_list = convert_char_to_phoneme(text_list)
+                
+            # 4. Default to Pinyin (Chinese/English)
+            else:
+                print("[Tokenizer] Default: Pinyin/Char")
+                final_text_list = convert_char_to_pinyin(text_list)
+        else:
+            print("[Tokenizer] Warning: No vocab map found, defaulting to Pinyin")
+            final_text_list = convert_char_to_pinyin(text_list)
 
         ref_audio_len = audio.shape[-1] // hop_length
         if fix_duration is not None:
