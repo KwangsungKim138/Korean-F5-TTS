@@ -80,6 +80,8 @@ def main():
 
     result = []
     duration_list = []
+    vocab_set = set()
+    vocab_set.add(" ")
     
     # Process each line
     # Format: relative_path|original|expanded|decomposed|duration|english
@@ -125,6 +127,10 @@ def main():
         try:
             allophone_tokens_list = convert_char_to_allophone([text_content])
             allophone_tokens = allophone_tokens_list[0] # Get the first (and only) result
+            
+            # Update vocab set
+            vocab_set.update(allophone_tokens)
+            
         except Exception as e:
             print(f"Error converting text '{text_content}': {e}")
             continue
@@ -152,24 +158,19 @@ def main():
     with open(save_dir / "duration.json", "w", encoding="utf-8") as f:
         json.dump({"duration": duration_list}, f, ensure_ascii=False)
 
-    # Generate and save vocab.txt
+    # Save vocab.txt
     print("\nGenerating vocab.txt ...")
-    vocab = generate_korean_vocab()
-    
-    # Also check if we missed any tokens from the dataset (just in case)
-    # dataset_vocab = set()
-    # for item in result:
-    #     dataset_vocab.update(item['text'])
-    # 
-    # But strictly speaking, our vocab is closed-set based on the rules. 
-    # If G2P produces something else, it might be a bug or non-korean char.
-    # Let's stick to the generated vocab for consistency.
     
     with open(save_dir / "vocab.txt", "w", encoding="utf-8") as f:
-        for v in vocab:
+        # Ensure space is at index 0
+        if " " in vocab_set:
+            vocab_set.remove(" ")
+        f.write(" \n")
+        
+        for v in sorted(list(vocab_set)):
             f.write(v + "\n")
 
-    print(f"Vocab size: {len(vocab)}")
+    print(f"Vocab size: {len(vocab_set) + 1}")
     print(f"Total duration: {sum(duration_list) / 3600:.2f} hours")
     print("Done!")
 
