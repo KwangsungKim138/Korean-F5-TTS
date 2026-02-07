@@ -24,6 +24,14 @@ def main(model_cfg):
     exp_name = f"{model_cfg.model.name}_{mel_spec_type}_{model_cfg.model.tokenizer}_{model_cfg.datasets.name}"
     wandb_resume_id = model_cfg.ckpts.get("wandb_resume_id", None)
 
+    # Expose data scale for wandb filtering/grouping (e.g. 1h, 3h, 5h, full)
+    ds_name = model_cfg.datasets.name
+    data_scale = (
+        ds_name.replace("KSS_", "")
+        if isinstance(ds_name, str) and ds_name.startswith("KSS_")
+        else "full"
+    )
+
     # set text tokenizer
     if tokenizer != "custom":
         tokenizer_path = model_cfg.datasets.name
@@ -62,7 +70,10 @@ def main(model_cfg):
         mel_spec_type=mel_spec_type,
         is_local_vocoder=model_cfg.model.vocoder.is_local,
         local_vocoder_path=model_cfg.model.vocoder.local_path,
-        model_cfg_dict=OmegaConf.to_container(model_cfg, resolve=True),
+        model_cfg_dict={
+            **OmegaConf.to_container(model_cfg, resolve=True),
+            "data_scale": data_scale,
+        },
     )
 
     train_dataset = load_dataset(model_cfg.datasets.name, tokenizer, mel_spec_kwargs=model_cfg.model.mel_spec)

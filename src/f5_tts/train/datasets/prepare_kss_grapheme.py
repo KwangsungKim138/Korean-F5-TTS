@@ -1,6 +1,6 @@
+import argparse
 import os
 import sys
-import shutil
 from pathlib import Path
 
 sys.path.append(os.getcwd())
@@ -53,29 +53,47 @@ def convert_text_to_jamos(text: str) -> list[str]:
             
     return jamos
 
-def main():
-    # Configuration
-    dataset_name = "KSS"
-    tokenizer_type = "kor_grapheme"
-    
-    # Paths
+def main() -> None:
+    parser = argparse.ArgumentParser(
+        description="Prepare KSS metadata with grapheme (jamo) tokenizer -> raw.arrow, duration.json, vocab.txt"
+    )
+    parser.add_argument(
+        "--transcript",
+        type=Path,
+        default=None,
+        help="Path to metadata file (default: data/KSS/transcript.v.1.4.txt). Can use train_1h.txt etc.",
+    )
+    parser.add_argument(
+        "--name",
+        type=str,
+        default="KSS",
+        help="Dataset output name. Saves to data/{name}_kor_grapheme (e.g. KSS_1h, KSS_3h for modes).",
+    )
+    parser.add_argument(
+        "--data-root",
+        type=Path,
+        default=None,
+        help="Data root directory (default: project_root/data). WAV paths resolved under {data-root}/KSS/.",
+    )
+    args = parser.parse_args()
+
     project_root = Path(os.getcwd())
-    data_root = project_root / "data"
+    data_root = args.data_root or (project_root / "data")
     dataset_dir = data_root / "KSS"
-    transcript_path = dataset_dir / "transcript.v.1.4.txt"
-    
-    # Output directory: data/KSS_grapheme
+    transcript_path = args.transcript or (dataset_dir / "transcript.v.1.4.txt")
+    dataset_name = args.name
+    tokenizer_type = "kor_grapheme"
     save_dir = data_root / f"{dataset_name}_{tokenizer_type}"
-    
+
     print(f"\nPrepare for {dataset_name} with {tokenizer_type} tokenizer")
-    print(f"Reading from: {dataset_dir}")
+    print(f"Transcript: {transcript_path}")
+    print(f"WAV base dir: {dataset_dir}")
     print(f"Saving to: {save_dir}\n")
 
     if not transcript_path.exists():
         print(f"Error: Transcript file not found at {transcript_path}")
         return
 
-    # Read transcript
     with open(transcript_path, "r", encoding="utf-8") as f:
         lines = f.readlines()
 

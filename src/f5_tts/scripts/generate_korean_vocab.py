@@ -17,6 +17,12 @@ def generate_vocab():
     # 0. Space (Padding/Separator)
     vocab.append(" ")
     
+    # 0.1 Punctuation (KSS Dataset)
+    punctuation = ["!", ",", ".", "?"]
+    for p in punctuation:
+        if p not in vocab:
+            vocab.append(p)
+    
     # 1. Basic Phonemes
     for consonant in PHONEME_CONSONANTS:
         if consonant not in vocab:

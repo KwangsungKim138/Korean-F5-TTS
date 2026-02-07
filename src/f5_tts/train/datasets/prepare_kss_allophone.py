@@ -1,6 +1,6 @@
+import argparse
 import os
 import sys
-import shutil
 from pathlib import Path
 
 sys.path.append(os.getcwd())
@@ -35,39 +35,58 @@ def generate_korean_vocab():
             vocab.append(vowel)
             
     # 2. Allophones
-    for voiceless in PHONEMES_I: # 어두 초성
+    for voiceless in PHONEMES_I:  # word-initial onset
         token = voiceless + MARK_INIT
         if token not in vocab:
             vocab.append(token)
             
-    for palatal in PHONEMES_P: # 구개음화
+    for palatal in PHONEMES_P:  # palatalization
         token = palatal + MARK_PAL
         if token not in vocab:
             vocab.append(token)
             
-    for coda in PHONEMES_C: # 종성
+    for coda in PHONEMES_C:  # coda
         token = coda + MARK_CODA
         if token not in vocab:
             vocab.append(token)
     return vocab
 
-def main():
-    # Configuration
-    dataset_name = "KSS"
-    tokenizer_type = "kor_allophone"
-    
+def main() -> None:
+    parser = argparse.ArgumentParser(
+        description="Prepare KSS metadata with allophone tokenizer -> raw.arrow, duration.json, vocab.txt"
+    )
+    parser.add_argument(
+        "--transcript",
+        type=Path,
+        default=None,
+        help="Path to metadata file (default: data/KSS/transcript.v.1.4.txt). Can use train_1h.txt etc.",
+    )
+    parser.add_argument(
+        "--name",
+        type=str,
+        default="KSS",
+        help="Dataset output name. Saves to data/{name}_kor_allophone (e.g. KSS_1h, KSS_3h for modes).",
+    )
+    parser.add_argument(
+        "--data-root",
+        type=Path,
+        default=None,
+        help="Data root directory (default: project_root/data). WAV paths resolved under {data-root}/KSS/.",
+    )
+    args = parser.parse_args()
+
     # Paths
-    # Assuming running from project root
     project_root = Path(os.getcwd())
-    data_root = project_root / "data"
+    data_root = args.data_root or (project_root / "data")
     dataset_dir = data_root / "KSS"
-    transcript_path = dataset_dir / "transcript.v.1.4.txt"
-    
-    # Output directory: data/KSS_kor_allophone
+    transcript_path = args.transcript or (dataset_dir / "transcript.v.1.4.txt")
+    dataset_name = args.name
+    tokenizer_type = "kor_allophone"
     save_dir = data_root / f"{dataset_name}_{tokenizer_type}"
-    
+
     print(f"\nPrepare for {dataset_name} with {tokenizer_type} tokenizer")
-    print(f"Reading from: {dataset_dir}")
+    print(f"Transcript: {transcript_path}")
+    print(f"WAV base dir: {dataset_dir}")
     print(f"Saving to: {save_dir}\n")
 
     if not transcript_path.exists():
