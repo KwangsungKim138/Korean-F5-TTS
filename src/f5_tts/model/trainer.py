@@ -434,6 +434,17 @@ class Trainer:
                         torchaudio.save(
                             f"{log_samples_path}/update_{global_update}_ref.wav", ref_audio, target_sample_rate
                         )
+                        
+                        if self.logger == "wandb":
+                            self.accelerator.log(
+                                {
+                                    "generated_audio": wandb.Audio(gen_audio.squeeze().numpy(), sample_rate=target_sample_rate, caption=f"Gen: {infer_text[0]}"),
+                                    "reference_audio": wandb.Audio(ref_audio.squeeze().numpy(), sample_rate=target_sample_rate, caption=f"Ref: {infer_text[0]}"),
+                                    "mel_spectrogram": wandb.Image(gen_mel_spec.cpu().numpy(), caption="Generated Mel Spectrogram"),
+                                },
+                                step=global_update,
+                            )
+                        
                         self.model.train()
 
         self.save_checkpoint(global_update, last=True)
