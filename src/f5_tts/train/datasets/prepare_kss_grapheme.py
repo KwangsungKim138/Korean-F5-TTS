@@ -81,6 +81,8 @@ def main():
 
     result = []
     duration_list = []
+    vocab_set = set()
+    vocab_set.add(" ")
     
     print("Processing audio and text (Grapheme Baseline)...")
     
@@ -110,6 +112,8 @@ def main():
         # Convert to Jamos (Graphemes)
         try:
             grapheme_tokens = convert_text_to_jamos(text_content)
+            # Update vocab set
+            vocab_set.update(grapheme_tokens)
         except Exception as e:
             print(f"Error converting text '{text_content}': {e}")
             continue
@@ -137,15 +141,17 @@ def main():
     with open(save_dir / "duration.json", "w", encoding="utf-8") as f:
         json.dump({"duration": duration_list}, f, ensure_ascii=False)
 
-    # Generate and save vocab.txt
+    # Save vocab.txt
     print("\nGenerating vocab.txt ...")
-    vocab = generate_grapheme_vocab()
     
     with open(save_dir / "vocab.txt", "w", encoding="utf-8") as f:
-        for v in vocab:
+        if " " in vocab_set:
+            vocab_set.remove(" ")
+        f.write(" \n")
+        for v in sorted(list(vocab_set)):
             f.write(v + "\n")
 
-    print(f"Vocab size: {len(vocab)}")
+    print(f"Vocab size: {len(vocab_set) + 1}")
     print(f"Total duration: {sum(duration_list) / 3600:.2f} hours")
     print("Done!")
 
