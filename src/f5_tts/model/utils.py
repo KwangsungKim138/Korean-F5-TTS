@@ -156,12 +156,18 @@ except ImportError:
 
 _g2p_instance = None
 
+
 def get_g2p():
     global _g2p_instance
     if _g2p_instance is None:
         if G2p is None:
-             raise ImportError("g2pk2 is not installed. Please install it with `pip install g2pk2`.")
-        _g2p_instance = G2p()
+            raise ImportError("g2pk2 is not installed. Please install it with `pip install g2pk2`.")
+        # Suppress g2pk2/mecab init messages (e.g. "mecab installed") on first use
+        import contextlib
+
+        with open(os.devnull, "w", encoding="utf-8") as devnull:
+            with contextlib.redirect_stdout(devnull), contextlib.redirect_stderr(devnull):
+                _g2p_instance = G2p()
     return _g2p_instance
 
 # 1. 초/중/종성 자소 자모 집합 정의

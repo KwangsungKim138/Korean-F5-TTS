@@ -484,19 +484,20 @@ def infer_batch_process(
         # Determine tokenizer based on vocab content
         if hasattr(model_obj, "vocab_char_map") and model_obj.vocab_char_map is not None:
             vocab = model_obj.vocab_char_map
-            
-            # 1. Allophone Check (Look for unique marker 'ⁱ')
-            if "ⁱ" in vocab:
+            vocab_keys = set(vocab.keys())
+
+            # 1. Allophone Check (any token contains variation mark ⁱ, ᶜ, or ʲ)
+            if any("ⁱ" in k or "ᶜ" in k or "ʲ" in k for k in vocab_keys):
                 print("[Tokenizer] Detected: Korean Allophone")
                 final_text_list = convert_char_to_allophone(text_list)
-                
+
             # 2. Grapheme Check (Look for complex coda 'ㅄ' which only exists in raw Jamo)
-            elif "ㅄ" in vocab:
+            elif "ㅄ" in vocab_keys:
                 print("[Tokenizer] Detected: Korean Grapheme (Jamo)")
                 final_text_list = convert_char_to_grapheme(text_list)
-                
-            # 3. Phoneme Check (Look for basic Jamo 'ㄱ' but no complex coda)
-            elif "ㄱ" in vocab:
+
+            # 3. Phoneme Check (Look for basic Jamo 'ㄱ')
+            elif "ㄱ" in vocab_keys:
                 print("[Tokenizer] Detected: Korean Phoneme (Standard G2P)")
                 final_text_list = convert_char_to_phoneme(text_list)
                 
