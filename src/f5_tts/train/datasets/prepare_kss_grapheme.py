@@ -9,7 +9,13 @@ import soundfile as sf
 from datasets.arrow_writer import ArrowWriter
 from tqdm import tqdm
 
-from f5_tts.model.utils import convert_char_to_grapheme, convert_char_to_grapheme_skipTC
+from f5_tts.model.utils import (
+    convert_char_to_grapheme,
+    convert_char_to_grapheme_skipTC,
+    GRAPHEME_CHOSEONG,
+    GRAPHEME_JUNGSEONG,
+    GRAPHEME_JONGSEONG,
+)
 
 def main() -> None:
     parser = argparse.ArgumentParser(
@@ -73,13 +79,32 @@ def main() -> None:
     with open(transcript_path, "r", encoding="utf-8") as f:
         lines = f.readlines()
 
+    # 데이터셋에 등장하는 구두점/기호 수집 (한글·공백 제외)
+    punctuation_set = set()
+    for line in lines:
+        parts = line.strip().split("|")
+        if len(parts) < 3:
+            continue
+        for char in parts[2]:
+            if char != " " and not (ord("가") <= ord(char) <= ord("힣")):
+                punctuation_set.add(char)
+
+    # Grapheme vocab = 가능한 모든 초성·중성·종성(빈 문자 '' 제외) ∪ 데이터셋 구두점
+    vocab_set = (
+        set(GRAPHEME_CHOSEONG)
+        | set(GRAPHEME_JUNGSEONG)
+        | set(j for j in GRAPHEME_JONGSEONG if j)
+        | punctuation_set
+    )
+    vocab_set.discard("")
+    if use_skip_tc and not use_legacy:
+        vocab_set.add("*")
+
     result = []
     duration_list = []
-    vocab_set = set()
-    vocab_set.add(" ")
-    
+
     print("Processing audio and text (Grapheme Baseline)...")
-    
+
     for line in tqdm(lines):
         parts = line.strip().split("|")
         if len(parts) < 3:
@@ -109,7 +134,6 @@ def main() -> None:
                 grapheme_tokens = convert_char_to_grapheme_skipTC([text_content], legacy=use_legacy)[0]
             else:
                 grapheme_tokens = convert_char_to_grapheme([text_content])[0]
-            vocab_set.update(grapheme_tokens)
         except Exception as e:
             print(f"Error converting text '{text_content}': {e}")
             continue
@@ -137,17 +161,14 @@ def main() -> None:
     with open(save_dir / "duration.json", "w", encoding="utf-8") as f:
         json.dump({"duration": duration_list}, f, ensure_ascii=False)
 
-    # Save vocab.txt
+    # Save vocab.txt (고정 집합: 초성+중성+종성+구두점, 빈 문자 '' 제외)
     print("\nGenerating vocab.txt ...")
-    
+    vocab_list = [" "] + sorted(vocab_set)
     with open(save_dir / "vocab.txt", "w", encoding="utf-8") as f:
-        if " " in vocab_set:
-            vocab_set.remove(" ")
-        f.write(" \n")
-        for v in sorted(list(vocab_set)):
+        for v in vocab_list:
             f.write(v + "\n")
 
-    print(f"Vocab size: {len(vocab_set) + 1}")
+    print(f"Vocab size: {len(vocab_list)}")
     print(f"Total duration: {sum(duration_list) / 3600:.2f} hours")
     print("Done!")
 

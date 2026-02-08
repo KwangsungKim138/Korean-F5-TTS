@@ -18,38 +18,8 @@ from f5_tts.model.utils import (
     PHONEMES_C,
     MARK_INIT,
     MARK_PAL,
-    MARK_CODA
+    MARK_CODA,
 )
-
-def generate_korean_vocab():
-    vocab = []
-    # 0. Space (Padding/Separator)
-    vocab.append(" ")
-    
-    # 1. Basic Phonemes
-    for consonant in PHONEME_CONSONANTS:
-        if consonant not in vocab:
-            vocab.append(consonant)
-    for vowel in PHONEME_VOWELS:
-        if vowel not in vocab:
-            vocab.append(vowel)
-            
-    # 2. Allophones
-    for voiceless in PHONEMES_I:  # word-initial onset
-        token = voiceless + MARK_INIT
-        if token not in vocab:
-            vocab.append(token)
-            
-    for palatal in PHONEMES_P:  # palatalization
-        token = palatal + MARK_PAL
-        if token not in vocab:
-            vocab.append(token)
-            
-    for coda in PHONEMES_C:  # coda
-        token = coda + MARK_CODA
-        if token not in vocab:
-            vocab.append(token)
-    return vocab
 
 def main() -> None:
     parser = argparse.ArgumentParser(
@@ -97,11 +67,31 @@ def main() -> None:
     with open(transcript_path, "r", encoding="utf-8") as f:
         lines = f.readlines()
 
+    # 데이터셋에 등장하는 구두점/기호 수집 (한글·공백 제외)
+    punctuation_set = set()
+    for line in lines:
+        parts = line.strip().split("|")
+        if len(parts) < 3:
+            continue
+        for char in parts[2]:
+            if char != " " and not (ord("가") <= ord(char) <= ord("힣")):
+                punctuation_set.add(char)
+
+    # Allophone vocab = phoneme vocab(자음+모음+구두점, '' 제외) + 변이음 토큰
+    phoneme_base = (
+        set(PHONEME_CONSONANTS) | set(PHONEME_VOWELS) | punctuation_set
+    )
+    phoneme_base.discard("")
+    allophone_tokens = (
+        {c + MARK_INIT for c in PHONEMES_I}
+        | {p + MARK_PAL for p in PHONEMES_P}
+        | {c + MARK_CODA for c in PHONEMES_C}
+    )
+    vocab_set = phoneme_base | allophone_tokens
+
     result = []
     duration_list = []
-    vocab_set = set()
-    vocab_set.add(" ")
-    
+
     # Process each line
     # Format: relative_path|original|expanded|decomposed|duration|english
     
@@ -145,11 +135,8 @@ def main() -> None:
         # convert_char_to_allophone expects a list of strings and returns a list of list of tokens
         try:
             allophone_tokens_list = convert_char_to_allophone([text_content])
-            allophone_tokens = allophone_tokens_list[0] # Get the first (and only) result
-            
-            # Update vocab set
-            vocab_set.update(allophone_tokens)
-            
+            allophone_tokens = allophone_tokens_list[0]  # Get the first (and only) result
+
         except Exception as e:
             print(f"Error converting text '{text_content}': {e}")
             continue
@@ -177,19 +164,14 @@ def main() -> None:
     with open(save_dir / "duration.json", "w", encoding="utf-8") as f:
         json.dump({"duration": duration_list}, f, ensure_ascii=False)
 
-    # Save vocab.txt
+    # Save vocab.txt (phoneme 집합 + 변이음, 빈 문자 '' 제외)
     print("\nGenerating vocab.txt ...")
-    
+    vocab_list = [" "] + sorted(vocab_set)
     with open(save_dir / "vocab.txt", "w", encoding="utf-8") as f:
-        # Ensure space is at index 0
-        if " " in vocab_set:
-            vocab_set.remove(" ")
-        f.write(" \n")
-        
-        for v in sorted(list(vocab_set)):
+        for v in vocab_list:
             f.write(v + "\n")
 
-    print(f"Vocab size: {len(vocab_set) + 1}")
+    print(f"Vocab size: {len(vocab_list)}")
     print(f"Total duration: {sum(duration_list) / 3600:.2f} hours")
     print("Done!")
 
