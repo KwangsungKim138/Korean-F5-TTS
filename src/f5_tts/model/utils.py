@@ -184,6 +184,9 @@ MARK_INIT = "ⁱ"  # 어두 초성 (Word-initial -> Voiceless)
 MARK_CODA = "ᶜ"  # 종성 (Unreleased/Lateral 등)
 MARK_PAL  = "ʲ"  # 구개음화 (Palatalized)
 
+# SkipTC: 종성 없을 때 음절 경계 표시. 새 버전은 명시 토큰 '*', 레거시(2026-02-07)는 ''.
+SKIPTC_TOKEN = "*"
+
 def _text_to_pronunciation(text: str) -> str:
     """
     텍스트 -> 발음열 변환
@@ -213,10 +216,13 @@ def _syllable_to_phonemes(syllable: str) -> list[str]:
 def _classify_into_allophones(
     phonemes: list[str],
     is_eojeol_initial: bool,
-    ) -> list[str]:
+    add_empty_jong: bool = False,
+    skip_tc_token: str = SKIPTC_TOKEN,
+) -> list[str]:
     """
-    음소열(sequence of phonemes)을 변이음(allophone) 단위로 분류,
-    sequence of allophones 출력
+    음소열을 변이음 단위로 분류.
+    add_empty_jong: True면 종성 없을 때 skip_tc_token 부가 (allophone-skipTC).
+    skip_tc_token: SKIPTC_TOKEN('*') 또는 ''(레거시).
     """
     allophones = []
 
@@ -227,96 +233,142 @@ def _classify_into_allophones(
 
     # 1) 초성(onset)
     if is_eojeol_initial and cho in PHONEMES_I:
-        allophones.append(cho + MARK_INIT)  # 예: ㄱ -> ㄱⁱ
+        allophones.append(cho + MARK_INIT)
     elif cho in PHONEMES_P and jung in VOWELS_Y:
-        allophones.append(cho + MARK_PAL)   # 예: ㅅ -> ㅅʲ
-    else: # allophone 기호가 없는 초성으로, 음소에 단일 음가(phone)가 대응됨을 의미
+        allophones.append(cho + MARK_PAL)
+    else:
         allophones.append(cho)
 
     # 2) 중성(nucleus)
     allophones.append(jung)
 
-    # 3) 종성(coda)
+    # 3) 종성(coda). add_empty_jong이면 빈 종성에 skip_tc_token 부가
     if jong:
         allophones.append(jong + MARK_CODA)
+    elif add_empty_jong:
+        allophones.append(skip_tc_token)
 
     return allophones
 
 def convert_char_to_allophone(text_list: list[str]) -> list[list[str]]:
-    """
-    Convert text list to Korean allophone list
-    """
+    """Korean allophone list (no syllable-boundary token for empty coda)."""
+    return _convert_char_to_allophone_impl(text_list, add_empty_jong=False)
+
+
+def convert_char_to_allophone_skipTC(
+    text_list: list[str], legacy: bool = False
+) -> list[list[str]]:
+    """Korean allophone with SkipTC. legacy=True: use '' (2026-02-07). Else use '*'."""
+    return _convert_char_to_allophone_impl(
+        text_list, add_empty_jong=True, skip_tc_token="" if legacy else SKIPTC_TOKEN
+    )
+
+
+def _convert_char_to_allophone_impl(
+    text_list: list[str],
+    add_empty_jong: bool,
+    skip_tc_token: str = SKIPTC_TOKEN,
+) -> list[list[str]]:
     final_text_list = []
-    
     for text in text_list:
         result = []
-        # 1. 문자열을 발음열로 변환하고
         pronunciation = _text_to_pronunciation(text)
-
-        # 2. 공백을 기준으로 어절 분리
         eojeols = _pronunciation_to_eojeols(pronunciation)
-
-        # 3. 각 어절에 대해
         for eojeol in eojeols:
-            # 4. 음절,
             for i, syllable in enumerate(eojeol):
-                # 5. 음소 단위로 분해한 뒤
                 phonemes = _syllable_to_phonemes(syllable)
-                # 6. 변이음 분류
-                allophones = _classify_into_allophones(phonemes,
-                                          is_eojeol_initial = (i == 0))
+                allophones = _classify_into_allophones(
+                    phonemes,
+                    is_eojeol_initial=(i == 0),
+                    add_empty_jong=add_empty_jong,
+                    skip_tc_token=skip_tc_token,
+                )
                 result.extend(allophones)
-            result.append(' ')
-        
-        # remove last space
-        if result and result[-1] == ' ':
+            result.append(" ")
+        if result and result[-1] == " ":
             result.pop()
-            
         final_text_list.append(result)
-
     return final_text_list
+
+
+def convert_char_to_grapheme_skipTC(
+    text_list: list[str], legacy: bool = False
+) -> list[list[str]]:
+    """
+    Korean Grapheme (Jamo) with SkipTC. legacy=True: use '' (2026-02-07). Else use '*'.
+    """
+    token = "" if legacy else SKIPTC_TOKEN
+    final_text_list = []
+    for text in text_list:
+        result = []
+        for char in text:
+            if char == " ":
+                result.append(" ")
+            else:
+                jamos = _syllable_to_phonemes(char)
+                for j in jamos:
+                    result.append(j if j else token)
+        final_text_list.append(result)
+    return final_text_list
+
 
 def convert_char_to_grapheme(text_list: list[str]) -> list[list[str]]:
     """
-    Convert text list to Korean Grapheme (Jamo) list (No G2P)
+    Convert text list to Korean Grapheme (Jamo) list (No G2P). Empty jongseong '' is filtered out (no hint).
     """
     final_text_list = []
     for text in text_list:
         result = []
         for char in text:
-            if char == ' ':
-                result.append(' ')
+            if char == " ":
+                result.append(" ")
             else:
-                # Decompose syllable
                 jamos = _syllable_to_phonemes(char)
-                # Filter out empty jongseong if any
                 result.extend([j for j in jamos if j])
-        
         final_text_list.append(result)
     return final_text_list
 
+
+def convert_char_to_phoneme_skipTC(
+    text_list: list[str], legacy: bool = False
+) -> list[list[str]]:
+    """
+    Korean Phoneme with SkipTC. legacy=True: use '' (2026-02-07). Else use '*' for empty coda.
+    """
+    token = "" if legacy else SKIPTC_TOKEN
+    final_text_list = []
+    for text in text_list:
+        result = []
+        pronunciation = _text_to_pronunciation(text)
+        eojeols = _pronunciation_to_eojeols(pronunciation)
+        for eojeol in eojeols:
+            for syllable in eojeol:
+                phonemes = _syllable_to_phonemes(syllable)
+                for p in phonemes:
+                    result.append(p if p else token)
+            result.append(" ")
+        if result and result[-1] == " ":
+            result.pop()
+        final_text_list.append(result)
+    return final_text_list
+
+
 def convert_char_to_phoneme(text_list: list[str]) -> list[list[str]]:
     """
-    Convert text list to Korean Standard Phoneme list (G2P applied, No Allophone markers)
+    Convert text list to Korean Standard Phoneme list (G2P applied). Empty coda '' is filtered out (no hint).
     """
     final_text_list = []
     for text in text_list:
         result = []
-        # 1. G2P
         pronunciation = _text_to_pronunciation(text)
-        # 2. Eojeol split
         eojeols = _pronunciation_to_eojeols(pronunciation)
-        
         for eojeol in eojeols:
             for syllable in eojeol:
-                # 3. Decompose
                 phonemes = _syllable_to_phonemes(syllable)
                 result.extend([p for p in phonemes if p])
-            result.append(' ')
-            
-        if result and result[-1] == ' ':
+            result.append(" ")
+        if result and result[-1] == " ":
             result.pop()
-            
         final_text_list.append(result)
     return final_text_list
 

@@ -33,8 +33,11 @@ from f5_tts.model.utils import (
     convert_char_to_pinyin,
     get_tokenizer,
     convert_char_to_allophone,
+    convert_char_to_allophone_skipTC,
     convert_char_to_grapheme,
+    convert_char_to_grapheme_skipTC,
     convert_char_to_phoneme,
+    convert_char_to_phoneme_skipTC,
 )
 
 
@@ -248,6 +251,8 @@ def load_model(
     ode_method=ode_method,
     use_ema=True,
     device=device,
+    tokenizer_version=None,
+    use_skip_tc=False,
 ):
     if vocab_file == "":
         vocab_file = str(files("f5_tts").joinpath("infer/examples/vocab.txt"))
@@ -276,6 +281,12 @@ def load_model(
 
     dtype = torch.float32 if mel_spec_type == "bigvgan" else None
     model = load_checkpoint(model, ckpt_path, device, dtype=dtype, use_ema=use_ema)
+
+    # SkipTC and legacy: only from CLI, never from vocab
+    model._use_skip_tc = use_skip_tc
+    model._tokenizer_version_legacy = tokenizer_version in ("2026-02-07", "legacy")
+    if use_skip_tc:
+        print("Tokenizer: skipTC enabled" + (" (legacy 2026-02-07, token='')" if model._tokenizer_version_legacy else " (token='*')") + ".\n")
 
     return model
 
@@ -481,26 +492,37 @@ def infer_batch_process(
         # Prepare the text
         text_list = [ref_text + gen_text]
         
-        # Determine tokenizer based on vocab content
+        # Tokenizer: skipTC and legacy only from CLI (never from vocab)
+        use_skip_tc = getattr(model_obj, "_use_skip_tc", False)
+        use_legacy = getattr(model_obj, "_tokenizer_version_legacy", False)
         if hasattr(model_obj, "vocab_char_map") and model_obj.vocab_char_map is not None:
             vocab = model_obj.vocab_char_map
-            
-            # 1. Allophone Check (Look for unique marker 'ⁱ')
-            if "ⁱ" in vocab:
-                print("[Tokenizer] Detected: Korean Allophone")
-                final_text_list = convert_char_to_allophone(text_list)
-                
-            # 2. Grapheme Check (Look for complex coda 'ㅄ' which only exists in raw Jamo)
+
+            # 1. Allophone
+            if any("ⁱ" in k or "ᶜ" in k or "ʲ" in k for k in vocab):
+                if use_skip_tc:
+                    print("[Tokenizer] Korean Allophone (skipTC)" + (" legacy" if use_legacy else ""))
+                    final_text_list = convert_char_to_allophone_skipTC(text_list, legacy=use_legacy)
+                else:
+                    print("[Tokenizer] Korean Allophone")
+                    final_text_list = convert_char_to_allophone(text_list)
+            # 2. Grapheme
             elif "ㅄ" in vocab:
-                print("[Tokenizer] Detected: Korean Grapheme (Jamo)")
-                final_text_list = convert_char_to_grapheme(text_list)
-                
-            # 3. Phoneme Check (Look for basic Jamo 'ㄱ' but no complex coda)
+                if use_skip_tc:
+                    print("[Tokenizer] Korean Grapheme (skipTC)" + (" legacy" if use_legacy else ""))
+                    final_text_list = convert_char_to_grapheme_skipTC(text_list, legacy=use_legacy)
+                else:
+                    print("[Tokenizer] Korean Grapheme (Jamo)")
+                    final_text_list = convert_char_to_grapheme(text_list)
+            # 3. Phoneme
             elif "ㄱ" in vocab:
-                print("[Tokenizer] Detected: Korean Phoneme (Standard G2P)")
-                final_text_list = convert_char_to_phoneme(text_list)
-                
-            # 4. Default to Pinyin (Chinese/English)
+                if use_skip_tc:
+                    print("[Tokenizer] Korean Phoneme (skipTC)" + (" legacy" if use_legacy else ""))
+                    final_text_list = convert_char_to_phoneme_skipTC(text_list, legacy=use_legacy)
+                else:
+                    print("[Tokenizer] Korean Phoneme (Standard G2P)")
+                    final_text_list = convert_char_to_phoneme(text_list)
+            # 4. Default Pinyin
             else:
                 print("[Tokenizer] Default: Pinyin/Char")
                 final_text_list = convert_char_to_pinyin(text_list)

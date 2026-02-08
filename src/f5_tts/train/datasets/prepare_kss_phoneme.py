@@ -9,61 +9,7 @@ import soundfile as sf
 from datasets.arrow_writer import ArrowWriter
 from tqdm import tqdm
 
-from f5_tts.model.utils import (
-    _text_to_pronunciation,
-    _pronunciation_to_eojeols,
-    _syllable_to_phonemes,
-    PHONEME_CONSONANTS,
-    PHONEME_VOWELS
-)
-
-def generate_phoneme_vocab():
-    vocab = []
-    # 0. Space (Padding/Separator)
-    vocab.append(" ")
-    
-    # 1. Basic Phonemes
-    for consonant in PHONEME_CONSONANTS:
-        if consonant not in vocab:
-            vocab.append(consonant)
-    for vowel in PHONEME_VOWELS:
-        if vowel not in vocab:
-            vocab.append(vowel)
-            
-    # Standard phoneme set usually doesn't include allophone marks
-    
-    # Add punctuation if needed? 
-    # For fair comparison with user's allophone setup (which didn't seem to explicit include punct), 
-    # we'll stick to this. But often punctuation is useful.
-    # Let's add standard punctuation just in case, as they might be preserved by g2p.
-    punctuation = [".", ",", "!", "?", "~", "…"]
-    for p in punctuation:
-        if p not in vocab:
-            vocab.append(p)
-
-    return vocab
-
-def convert_text_to_phonemes(text: str) -> list[str]:
-    """
-    Convert text to standard phonemes (Jamos) using g2pk + decomposition.
-    """
-    # 1. Text to Pronunciation (Hangul Syllables) via g2pk
-    pronunciation = _text_to_pronunciation(text)
-    
-    # 2. Decompose into Jamos
-    phonemes = []
-    # Split by space to handle word boundaries if needed, but here we just want the sequence
-    # _text_to_pronunciation preserves spaces
-    
-    for char in pronunciation:
-        if char == ' ':
-            phonemes.append(' ')
-        else:
-            # Decompose syllable
-            jamos = _syllable_to_phonemes(char)
-            phonemes.extend(jamos)
-            
-    return phonemes
+from f5_tts.model.utils import convert_char_to_phoneme, convert_char_to_phoneme_skipTC
 
 def main() -> None:
     parser = argparse.ArgumentParser(
@@ -87,6 +33,17 @@ def main() -> None:
         default=None,
         help="Data root directory (default: project_root/data). WAV paths resolved under {data-root}/KSS/.",
     )
+    parser.add_argument(
+        "--skip-tc",
+        action="store_true",
+        help="Add SkipTC token at syllable boundary (empty coda). Default: no skipTC.",
+    )
+    parser.add_argument(
+        "--tokenizer_version",
+        type=str,
+        default=None,
+        help="Only if --skip-tc: use '2026-02-07' or 'legacy' for skipTC as ''; omit for '*'.",
+    )
     args = parser.parse_args()
 
     project_root = Path(os.getcwd())
@@ -97,7 +54,14 @@ def main() -> None:
     tokenizer_type = "kor_phoneme"
     save_dir = data_root / f"{dataset_name}_{tokenizer_type}"
 
+    use_skip_tc = getattr(args, "skip_tc", False)
+    use_legacy = args.tokenizer_version in ("2026-02-07", "legacy") if use_skip_tc else False
+    if use_skip_tc:
+        tok_ver_str = "legacy (2026-02-07, skipTC='')" if use_legacy else "skipTC=*"
+    else:
+        tok_ver_str = "no skipTC (default)"
     print(f"\nPrepare for {dataset_name} with {tokenizer_type} tokenizer")
+    print(f"Mode: {tok_ver_str}")
     print(f"Transcript: {transcript_path}")
     print(f"WAV base dir: {dataset_dir}")
     print(f"Saving to: {save_dir}\n")
@@ -142,8 +106,10 @@ def main() -> None:
 
         # Convert to phonemes
         try:
-            phoneme_tokens = convert_text_to_phonemes(text_content)
-            # Update vocab set
+            if use_skip_tc:
+                phoneme_tokens = convert_char_to_phoneme_skipTC([text_content], legacy=use_legacy)[0]
+            else:
+                phoneme_tokens = convert_char_to_phoneme([text_content])[0]
             vocab_set.update(phoneme_tokens)
         except Exception as e:
             print(f"Error converting text '{text_content}': {e}")

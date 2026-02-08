@@ -9,49 +9,7 @@ import soundfile as sf
 from datasets.arrow_writer import ArrowWriter
 from tqdm import tqdm
 
-from f5_tts.model.utils import (
-    _syllable_to_phonemes,
-    PHONEME_CONSONANTS,
-    PHONEME_VOWELS
-)
-
-def generate_grapheme_vocab():
-    vocab = []
-    # 0. Space (Padding/Separator)
-    vocab.append(" ")
-    
-    # 1. Jamos (same as basic phonemes, but treating them as graphemes)
-    for consonant in PHONEME_CONSONANTS:
-        if consonant not in vocab:
-            vocab.append(consonant)
-    for vowel in PHONEME_VOWELS:
-        if vowel not in vocab:
-            vocab.append(vowel)
-            
-    # Add punctuation
-    punctuation = [".", ",", "!", "?", "~", "…"]
-    for p in punctuation:
-        if p not in vocab:
-            vocab.append(p)
-
-    return vocab
-
-def convert_text_to_jamos(text: str) -> list[str]:
-    """
-    Convert text to Jamos (Graphemes) simply by decomposing Hangul.
-    NO G2P (Pronunciation Rule) applied.
-    """
-    jamos = []
-    for char in text:
-        if char == ' ':
-            jamos.append(' ')
-        else:
-            # Decompose syllable using the utility
-            # This handles Hangul decomposition, and leaves other chars as is
-            decomposed = _syllable_to_phonemes(char)
-            jamos.extend(decomposed)
-            
-    return jamos
+from f5_tts.model.utils import convert_char_to_grapheme, convert_char_to_grapheme_skipTC
 
 def main() -> None:
     parser = argparse.ArgumentParser(
@@ -75,6 +33,17 @@ def main() -> None:
         default=None,
         help="Data root directory (default: project_root/data). WAV paths resolved under {data-root}/KSS/.",
     )
+    parser.add_argument(
+        "--skip-tc",
+        action="store_true",
+        help="Add SkipTC token at syllable boundary (empty coda). Default: no skipTC.",
+    )
+    parser.add_argument(
+        "--tokenizer_version",
+        type=str,
+        default=None,
+        help="Only if --skip-tc: use '2026-02-07' or 'legacy' for skipTC as ''; omit for '*'.",
+    )
     args = parser.parse_args()
 
     project_root = Path(os.getcwd())
@@ -85,7 +54,14 @@ def main() -> None:
     tokenizer_type = "kor_grapheme"
     save_dir = data_root / f"{dataset_name}_{tokenizer_type}"
 
+    use_skip_tc = getattr(args, "skip_tc", False)
+    use_legacy = args.tokenizer_version in ("2026-02-07", "legacy") if use_skip_tc else False
+    if use_skip_tc:
+        tok_ver_str = "legacy (2026-02-07, skipTC='')" if use_legacy else "skipTC=*"
+    else:
+        tok_ver_str = "no skipTC (default)"
     print(f"\nPrepare for {dataset_name} with {tokenizer_type} tokenizer")
+    print(f"Mode: {tok_ver_str}")
     print(f"Transcript: {transcript_path}")
     print(f"WAV base dir: {dataset_dir}")
     print(f"Saving to: {save_dir}\n")
@@ -129,8 +105,10 @@ def main() -> None:
 
         # Convert to Jamos (Graphemes)
         try:
-            grapheme_tokens = convert_text_to_jamos(text_content)
-            # Update vocab set
+            if use_skip_tc:
+                grapheme_tokens = convert_char_to_grapheme_skipTC([text_content], legacy=use_legacy)[0]
+            else:
+                grapheme_tokens = convert_char_to_grapheme([text_content])[0]
             vocab_set.update(grapheme_tokens)
         except Exception as e:
             print(f"Error converting text '{text_content}': {e}")

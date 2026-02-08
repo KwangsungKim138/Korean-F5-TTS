@@ -174,6 +174,17 @@ parser.add_argument(
     type=str,
     help="Specify the device to run on",
 )
+parser.add_argument(
+    "--skip_tc",
+    action="store_true",
+    help="Use SkipTC token at syllable boundary (for grapheme/phoneme/allophone-skipTC models). Default: off.",
+)
+parser.add_argument(
+    "--tokenizer_version",
+    type=str,
+    default=None,
+    help="Only with --skip_tc: use '2026-02-07' or 'legacy' for skipTC token ''. Omit for '*'.",
+)
 args = parser.parse_args()
 
 
@@ -295,9 +306,18 @@ elif ckpt_file.startswith("hf://"):
 if vocab_file.startswith("hf://"):
     vocab_file = str(cached_path(vocab_file))
 
+tokenizer_version = getattr(args, "tokenizer_version", None) or config.get("tokenizer_version")
+use_skip_tc = getattr(args, "skip_tc", False) or config.get("skip_tc", False)
 print(f"Using {model}...")
 ema_model = load_model(
-    model_cls, model_arc, ckpt_file, mel_spec_type=vocoder_name, vocab_file=vocab_file, device=device
+    model_cls,
+    model_arc,
+    ckpt_file,
+    mel_spec_type=vocoder_name,
+    vocab_file=vocab_file,
+    device=device,
+    tokenizer_version=tokenizer_version,
+    use_skip_tc=use_skip_tc,
 )
 
 
