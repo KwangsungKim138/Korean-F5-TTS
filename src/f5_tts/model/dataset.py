@@ -1,4 +1,5 @@
 import json
+import os
 from importlib.resources import files
 
 import torch
@@ -12,6 +13,33 @@ from tqdm import tqdm
 
 from f5_tts.model.modules import MelSpec
 from f5_tts.model.utils import default
+
+
+def _load_raw_table(rel_data_path: str, audio_type: str = "raw"):
+    """Load raw data as HuggingFace Dataset from Arrow or Parquet. Prefer Arrow then Parquet."""
+    if audio_type == "raw":
+        arrow_path = f"{rel_data_path}/raw.arrow"
+        parquet_path = f"{rel_data_path}/raw.parquet"
+        if os.path.exists(arrow_path):
+            return Dataset_.from_file(arrow_path), False
+        if os.path.exists(parquet_path):
+            return Dataset_.from_parquet(parquet_path), False
+        try:
+            return load_from_disk(f"{rel_data_path}/raw"), False
+        except Exception:  # noqa: S110
+            raise FileNotFoundError(
+                f"No raw data found at {rel_data_path}. Expected raw.arrow, raw.parquet, or raw/ directory."
+            )
+    elif audio_type == "mel":
+        mel_arrow = f"{rel_data_path}/mel.arrow"
+        mel_parquet = f"{rel_data_path}/mel.parquet"
+        if os.path.exists(mel_arrow):
+            return Dataset_.from_file(mel_arrow), True
+        if os.path.exists(mel_parquet):
+            return Dataset_.from_parquet(mel_parquet), True
+        raise FileNotFoundError(f"No mel data found at {rel_data_path}. Expected mel.arrow or mel.parquet.")
+    else:
+        raise ValueError(f"audio_type must be 'raw' or 'mel', got {audio_type!r}")
 
 
 class HFDataset(Dataset):
@@ -257,15 +285,7 @@ def load_dataset(
 
     if dataset_type == "CustomDataset":
         rel_data_path = str(files("f5_tts").joinpath(f"../../data/{dataset_name}_{tokenizer}"))
-        if audio_type == "raw":
-            try:
-                train_dataset = load_from_disk(f"{rel_data_path}/raw")
-            except:  # noqa: E722
-                train_dataset = Dataset_.from_file(f"{rel_data_path}/raw.arrow")
-            preprocessed_mel = False
-        elif audio_type == "mel":
-            train_dataset = Dataset_.from_file(f"{rel_data_path}/mel.arrow")
-            preprocessed_mel = True
+        train_dataset, preprocessed_mel = _load_raw_table(rel_data_path, audio_type=audio_type)
         with open(f"{rel_data_path}/duration.json", "r", encoding="utf-8") as f:
             data_dict = json.load(f)
         durations = data_dict["duration"]
@@ -278,11 +298,7 @@ def load_dataset(
         )
 
     elif dataset_type == "CustomDatasetPath":
-        try:
-            train_dataset = load_from_disk(f"{dataset_name}/raw")
-        except:  # noqa: E722
-            train_dataset = Dataset_.from_file(f"{dataset_name}/raw.arrow")
-
+        train_dataset, preprocessed_mel = _load_raw_table(dataset_name, audio_type=audio_type)
         with open(f"{dataset_name}/duration.json", "r", encoding="utf-8") as f:
             data_dict = json.load(f)
         durations = data_dict["duration"]

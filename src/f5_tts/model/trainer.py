@@ -53,6 +53,7 @@ class Trainer:
         is_local_vocoder: bool = False,  # use local path vocoder
         local_vocoder_path: str = "",  # local vocoder path
         model_cfg_dict: dict = dict(),  # training config
+        resume_from_checkpoint: bool = True,  # if False, start from update 0 (e.g. LoRA from pretrained)
     ):
         ddp_kwargs = DistributedDataParallelKwargs(find_unused_parameters=False)
 
@@ -118,6 +119,7 @@ class Trainer:
         self.keep_last_n_checkpoints = keep_last_n_checkpoints
         self.last_per_updates = default(last_per_updates, save_per_updates)
         self.checkpoint_path = default(checkpoint_path, "ckpts/test_f5-tts")
+        self.resume_from_checkpoint = resume_from_checkpoint
 
         self.batch_size_per_gpu = batch_size_per_gpu
         self.batch_size_type = batch_size_type
@@ -326,7 +328,7 @@ class Trainer:
         train_dataloader, self.scheduler = self.accelerator.prepare(
             train_dataloader, self.scheduler
         )  # actual multi_gpu updates = single_gpu updates / gpu nums
-        start_update = self.load_checkpoint()
+        start_update = self.load_checkpoint() if self.resume_from_checkpoint else 0
         global_update = start_update
 
         if exists(resumable_with_seed):
