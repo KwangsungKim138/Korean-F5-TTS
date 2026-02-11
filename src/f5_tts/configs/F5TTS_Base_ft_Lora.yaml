@@ -1,4 +1,5 @@
-# LoRA fine-tuning: pretrained base + vocab_pretr + N2gk+ -> g2p -> allophone dataset.
+# LoRA fine-tuning: pretrained base + pretrained (large) vocab + N2gk+ -> g2p -> allophone data.
+# Use pretrained vocab to keep multilingual capacity; text_num_embeds has +1 headroom for Filler/etc.
 # See README or train/README.md for step-by-step.
 
 hydra:
@@ -7,7 +8,7 @@ hydra:
 
 datasets:
   name: KSS_n2gk_allophone  # used for save_dir naming; actual data path = load_path if set
-  load_path: data/KSS_n2gk_allophone  # N2gk+ -> g2p -> allophone prepared data (raw.arrow, duration.json, vocab from prepare_kss_n2gk_allophone)
+  load_path: data/KSS_n2gk_allophone  # N2gk+ -> g2p -> allophone prepared data (raw.arrow, duration.json from prepare_kss_n2gk_allophone)
   batch_size_per_gpu: 9600
   batch_size_type: frame
   max_samples: 64
@@ -24,7 +25,7 @@ optim:
 model:
   name: F5TTS_Base
   tokenizer: custom  # use tokenizer_path for vocab
-  tokenizer_path: ckpts/pretrained/vocab_pretr.txt
+  tokenizer_path: ckpts/pretrained/vocab_pretr.txt  # keep pretrained (large) vocab for multilingual; model gets +1 embed headroom for Filler
   backbone: DiT
   arch:
     dim: 1024

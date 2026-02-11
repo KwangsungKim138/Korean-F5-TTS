@@ -1,6 +1,7 @@
 # LoRA fine-tuning (CoreaSpeech-style Hybrid): LoRA + Text Encoder unfrozen. r=16, alpha=32.
-# Usage: accelerate launch src/f5_tts/train/train_lora.py --config-name F5TTS_Base_ft datasets.name=KSS_full
-# Ensure save_dir contains pretrained_*.pt (or set ckpts.pretrained_path).
+# Usage: accelerate launch src/f5_tts/train/train_lora.py --config-name F5TTS_Base_ft_Lora
+# Override paths: ckpts.pretrained_path=... model.tokenizer_path=... datasets.load_path=...
+# Keep pretrained vocab (model.tokenizer_path); text_num_embeds has +1 headroom for Filler.
 
 import gc
 import os
@@ -38,6 +39,15 @@ def _load_pretrained_into_model(model: torch.nn.Module, ckpt_path: str) -> None:
         for k, v in state.items()
         if k not in ("initted", "update", "step")
     }
+    # Skip keys with shape mismatch (e.g. text_embed when vocab size differs); leave those params randomly initialized
+    model_state_dict = model.state_dict()
+    keys_to_remove = []
+    for k, v in state_dict.items():
+        if k in model_state_dict and v.shape != model_state_dict[k].shape:
+            print(f"Skipping {k} due to shape mismatch: checkpoint {v.shape} vs model {model_state_dict[k].shape}")
+            keys_to_remove.append(k)
+    for k in keys_to_remove:
+        del state_dict[k]
     for key in ["mel_spec.mel_stft.mel_scale.fb", "mel_spec.mel_stft.spectrogram.window"]:
         state_dict.pop(key, None)
     model.load_state_dict(state_dict, strict=False)
@@ -79,11 +89,14 @@ def main(model_cfg):
     else:
         tokenizer_path = model_cfg.model.tokenizer_path
     vocab_char_map, vocab_size = get_tokenizer(tokenizer_path, tokenizer)
+    # +1 headroom so Filler (or data token at index vocab_size) fits; keeps pretrained large vocab
+    text_num_embeds = vocab_size + 1
+    print(f"Vocab size: {vocab_size} -> text_num_embeds: {text_num_embeds} (embed rows: {text_num_embeds + 1})")
 
     model = CFM(
         transformer=model_cls(
             **model_arc,
-            text_num_embeds=vocab_size,
+            text_num_embeds=text_num_embeds,
             mel_dim=model_cfg.model.mel_spec.n_mel_channels,
         ),
         mel_spec_kwargs=model_cfg.model.mel_spec,
@@ -108,7 +121,6 @@ def main(model_cfg):
         target_modules=lora_targets,
         lora_dropout=0.0,
         bias="none",
-        task_type=TaskType.CAUSAL_LM,
     )
     model = get_peft_model(model, lora_config)
 
