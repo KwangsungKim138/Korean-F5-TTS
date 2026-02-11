@@ -1,4 +1,4 @@
-# LoRA fine-tuning: load pretrained base, apply LoRA (r=64, alpha=16), train only LoRA params.
+# LoRA fine-tuning (CoreaSpeech-style Hybrid): LoRA + Text Encoder unfrozen. r=16, alpha=32.
 # Usage: accelerate launch src/f5_tts/train/train_lora.py --config-name F5TTS_Base_ft datasets.name=KSS_full
 # Ensure save_dir contains pretrained_*.pt (or set ckpts.pretrained_path).
 
@@ -17,8 +17,8 @@ from f5_tts.model.utils import get_tokenizer
 
 
 # LoRA defaults (CoreaSpeech-style)
-LORA_R = 64
-LORA_ALPHA = 16
+LORA_R = 16
+LORA_ALPHA = 32
 LORA_TARGET_MODULES = ["to_q", "to_k", "to_v", "to_out.0"]  # DiT attention linears
 
 
@@ -111,6 +111,13 @@ def main(model_cfg):
         task_type=TaskType.CAUSAL_LM,
     )
     model = get_peft_model(model, lora_config)
+
+    # CoreaSpeech Hybrid: 텍스트 인코더(Text Embedding & ConvNeXt)는 Unfreeze하여 전체 학습
+    for name, param in model.named_parameters():
+        if "text_embed" in name or "text_blocks" in name or "convnext" in name.lower():
+            param.requires_grad = True
+
+    print("Trainable parameters (LoRA + Text Encoder):")
     model.print_trainable_parameters()
 
     trainer = Trainer(
@@ -145,11 +152,24 @@ def main(model_cfg):
         resume_from_checkpoint=False,
     )
 
-    train_dataset = load_dataset(
-        model_cfg.datasets.name,
-        tokenizer,
-        mel_spec_kwargs=model_cfg.model.mel_spec,
-    )
+    dataset_type = getattr(model_cfg.datasets, "dataset_type", "CustomDataset")
+    load_path = model_cfg.datasets.get("load_path", None)
+    if load_path:
+        # Resolve path relative to project root (current cwd after os.chdir)
+        data_path = os.path.join(os.getcwd(), load_path) if not os.path.isabs(load_path) else load_path
+        train_dataset = load_dataset(
+            data_path,
+            tokenizer,
+            dataset_type="CustomDatasetPath",
+            mel_spec_kwargs=model_cfg.model.mel_spec,
+        )
+    else:
+        train_dataset = load_dataset(
+            model_cfg.datasets.name,
+            tokenizer,
+            dataset_type=dataset_type,
+            mel_spec_kwargs=model_cfg.model.mel_spec,
+        )
     trainer.train(
         train_dataset,
         num_workers=model_cfg.datasets.num_workers,

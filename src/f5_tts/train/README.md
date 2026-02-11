@@ -64,7 +64,50 @@ If use tensorboard as logger, install it first with `pip install tensorboard`.
 
 <ins>The `use_ema = True` might be harmful for early-stage finetuned checkpoints</ins> (which goes just few updates, thus ema weights still dominated by pretrained ones), try turn it off with finetune gradio option or `load_model(..., use_ema=False)`, see if offer better results.
 
-### 3. W&B Logging
+### 3. LoRA fine-tuning (pretrained + N2gk+ → g2p → allophone)
+
+Config: `src/f5_tts/configs/F5TTS_Base_ft_Lora.yaml`. Pretrained ckpt and vocab paths are set there; data path is `datasets.load_path`.
+
+**1) 사전학습 모델·vocab 위치**
+
+- `ckpts/pretrained/model_pretrained_1200000.pt` — 사전학습 모델
+- `ckpts/pretrained/vocab_pretr.txt` — vocab (config에 이미 설정됨)
+
+**2) 데이터셋: N2gk+ → g2p → allophone**
+
+프로젝트 루트에서:
+
+```bash
+# KSS transcript 기준 (기본 출력: data/KSS_n2gk_allophone)
+python src/f5_tts/train/datasets/prepare_kss_n2gk_allophone.py --name KSS_n2gk_allophone --transcript data/KSS/transcript.v.1.4.txt
+
+# Parquet 입력이면
+python src/f5_tts/train/datasets/prepare_kss_n2gk_allophone.py --name KSS_n2gk_allophone --parquet /path/to/data.parquet --audio-base /path/to/wavs --write-parquet
+```
+
+생성되는 디렉터리: `data/KSS_n2gk_allophone/` (raw.arrow, duration.json, vocab.txt).
+
+**3) LoRA 학습 실행**
+
+```bash
+accelerate launch src/f5_tts/train/train_lora.py --config-name F5TTS_Base_ft_Lora
+```
+
+config에 이미 다음이 들어 있음:
+
+- `ckpts.pretrained_path: ckpts/pretrained/model_pretrained_1200000.pt`
+- `model.tokenizer_path: ckpts/pretrained/vocab_pretr.txt`
+- `datasets.load_path: data/KSS_n2gk_allophone`
+
+경로만 바꿀 경우 예:
+
+```bash
+accelerate launch src/f5_tts/train/train_lora.py --config-name F5TTS_Base_ft_Lora ckpts.pretrained_path=/path/to/model.pt model.tokenizer_path=/path/to/vocab.txt datasets.load_path=data/MyN2gkAllophone
+```
+
+체크포인트 저장 위치: `ckpts/F5TTS_Base_vocos_custom_KSS_n2gk_allophone_lora/`.
+
+### 4. W&B Logging
 
 The `wandb/` dir will be created under path you run training/finetuning scripts.
 
