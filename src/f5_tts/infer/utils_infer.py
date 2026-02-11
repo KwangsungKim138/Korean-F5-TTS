@@ -39,6 +39,7 @@ from f5_tts.model.utils import (
     convert_char_to_phoneme,
     convert_char_to_phoneme_skipTC,
 )
+from f5_tts.train.datasets.normalization_n2gk import normalize_n2gk_plus
 
 
 _ref_audio_cache = {}
@@ -253,6 +254,7 @@ def load_model(
     device=device,
     tokenizer_version=None,
     use_skip_tc=False,
+    use_n2gk_plus=True,
 ):
     if vocab_file == "":
         vocab_file = str(files("f5_tts").joinpath("infer/examples/vocab.txt"))
@@ -285,8 +287,11 @@ def load_model(
     # SkipTC and legacy: only from CLI, never from vocab
     model._use_skip_tc = use_skip_tc
     model._tokenizer_version_legacy = tokenizer_version in ("2026-02-07", "legacy")
+    model._use_n2gk_plus = use_n2gk_plus
     if use_skip_tc:
         print("Tokenizer: skipTC enabled" + (" (legacy 2026-02-07, token='')" if model._tokenizer_version_legacy else " (token='*')") + ".\n")
+    if use_n2gk_plus:
+        print("Tokenizer: N2gk+ (Korean text normalization) enabled before g2p/allophone.\n")
 
     return model
 
@@ -500,11 +505,14 @@ def infer_batch_process(
 
             # 1. Allophone
             if any("ⁱ" in k or "ᶜ" in k or "ʲ" in k for k in vocab):
+                use_n2gk = getattr(model_obj, "_use_n2gk_plus", False)
+                if use_n2gk:
+                    text_list = [normalize_n2gk_plus(t) for t in text_list]
                 if use_skip_tc:
-                    print("[Tokenizer] Korean Allophone (skipTC)" + (" legacy" if use_legacy else ""))
+                    print("[Tokenizer] Korean Allophone (skipTC)" + (" legacy" if use_legacy else "") + (" + N2gk+" if use_n2gk else ""))
                     final_text_list = convert_char_to_allophone_skipTC(text_list, legacy=use_legacy)
                 else:
-                    print("[Tokenizer] Korean Allophone")
+                    print("[Tokenizer] Korean Allophone" + (" + N2gk+" if use_n2gk else ""))
                     final_text_list = convert_char_to_allophone(text_list)
             # 2. Grapheme
             elif "ㅄ" in vocab:

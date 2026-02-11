@@ -140,6 +140,7 @@ def infer(
     cross_fade_duration=0.15,
     nfe_step=32,
     speed=1,
+    use_n2gk_plus=True,
     show_info=gr.Info,
 ):
     if not ref_audio_orig:
@@ -175,6 +176,9 @@ def infer(
             custom_ema_model = load_custom(model[1], vocab_path=model[2], model_cfg=model[3])
             pre_custom_path = model[1]
         ema_model = custom_ema_model
+
+    if hasattr(ema_model, "_use_n2gk_plus"):
+        ema_model._use_n2gk_plus = use_n2gk_plus
 
     final_wave, final_sample_rate, combined_spectrogram = infer_process(
         ref_audio,
@@ -244,6 +248,11 @@ with gr.Blocks() as app_tts:
                     info="If undesired long silence(s) produced, turn on to automatically detect and crop.",
                     value=False,
                 )
+                use_n2gk_plus_check = gr.Checkbox(
+                    label="Use N2gk+ (Korean text normalization)",
+                    info="Apply N2gk+ before g2p/allophone. Disable if model was trained without N2gk+.",
+                    value=True,
+                )
         speed_slider = gr.Slider(
             label="Speed",
             minimum=0.3,
@@ -289,6 +298,7 @@ with gr.Blocks() as app_tts:
         ref_text_input,
         gen_text_input,
         remove_silence,
+        use_n2gk_plus_check,
         randomize_seed,
         seed_input,
         cross_fade_duration_slider,
@@ -308,6 +318,7 @@ with gr.Blocks() as app_tts:
             cross_fade_duration=cross_fade_duration_slider,
             nfe_step=nfe_slider,
             speed=speed_slider,
+            use_n2gk_plus=use_n2gk_plus_check,
         )
         return audio_out, spectrogram_path, ref_text_out, used_seed
 
@@ -336,6 +347,7 @@ with gr.Blocks() as app_tts:
             ref_text_input,
             gen_text_input,
             remove_silence,
+            use_n2gk_plus_check,
             randomize_seed,
             seed_input,
             cross_fade_duration_slider,

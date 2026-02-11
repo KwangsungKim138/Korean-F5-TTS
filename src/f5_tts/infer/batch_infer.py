@@ -27,7 +27,7 @@ DEVICE = "cuda"
 
 
 VOCODER_NAME = "vocos"
-USE_N2GK_PLUS = False  # True if model was trained with N2gk+ -> g2pk -> allophone
+USE_N2GK_PLUS = True  # N2gk+ before g2p/allophone (set False for models trained without N2gk+)
 TARGET_RMS = 0.1
 CROSS_FADE_DURATION = 0.15
 NFE_STEP = 32

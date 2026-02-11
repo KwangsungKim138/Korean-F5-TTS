@@ -185,6 +185,18 @@ parser.add_argument(
     default=None,
     help="Only with --skip_tc: use '2026-02-07' or 'legacy' for skipTC token ''. Omit for '*'.",
 )
+parser.add_argument(
+    "--use_n2gk_plus",
+    action="store_true",
+    default=True,
+    help="Apply N2gk+ Korean text normalization before g2p/allophone (default: on).",
+)
+parser.add_argument(
+    "--no_n2gk_plus",
+    action="store_false",
+    dest="use_n2gk_plus",
+    help="Disable N2gk+ normalization.",
+)
 args = parser.parse_args()
 
 
@@ -308,6 +320,7 @@ if vocab_file.startswith("hf://"):
 
 tokenizer_version = getattr(args, "tokenizer_version", None) or config.get("tokenizer_version")
 use_skip_tc = getattr(args, "skip_tc", False) or config.get("skip_tc", False)
+use_n2gk_plus = getattr(args, "use_n2gk_plus", True) and config.get("use_n2gk_plus", True)
 print(f"Using {model}...")
 ema_model = load_model(
     model_cls,
@@ -318,6 +331,7 @@ ema_model = load_model(
     device=device,
     tokenizer_version=tokenizer_version,
     use_skip_tc=use_skip_tc,
+    use_n2gk_plus=use_n2gk_plus,
 )
 
 
