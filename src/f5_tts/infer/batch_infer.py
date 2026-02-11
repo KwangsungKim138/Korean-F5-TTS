@@ -7,7 +7,7 @@ import numpy as np
 from omegaconf import OmegaConf
 from hydra.utils import get_class
 
-# F5-TTS 라이브러리 임포트 (경로가 맞아야 함)
+
 from f5_tts.infer.utils_infer import (
     load_model,
     load_vocoder,
@@ -15,9 +15,7 @@ from f5_tts.infer.utils_infer import (
     preprocess_ref_audio_text,
 )
 
-# ==========================================
-# 설정 변수 (Bash 커맨드 및 요구사항 반영)
-# ==========================================
+
 CKPT_FILE = "ckpts/F5TTS_0209/model_450K.pt"
 VOCAB_FILE = "data/KSS_full_kor_allophone/vocab.txt"
 REF_AUDIO_PATH = "data/KSS/1/1_0001.wav"
@@ -27,8 +25,9 @@ TRANSCRIPT_PATH = "/home/waegari/projects/F5-TTS/data/KSS/test_for_eval.txt"
 MODEL_NAME = "F5TTS_Small"  # Bash 예시에 명시된 모델명
 DEVICE = "cuda"
 
-# 추론 설정 (기본값)
+
 VOCODER_NAME = "vocos"
+USE_N2GK_PLUS = False  # True if model was trained with N2gk+ -> g2pk -> allophone
 TARGET_RMS = 0.1
 CROSS_FADE_DURATION = 0.15
 NFE_STEP = 32
@@ -41,14 +40,14 @@ def main():
     if not os.path.exists(OUTPUT_DIR):
         os.makedirs(OUTPUT_DIR)
 
-    # 2. Vocoder 로드 (한 번만 수행)
+    # 2. Vocoder 로드
     print(f"Loading Vocoder ({VOCODER_NAME})...")
     vocoder = load_vocoder(vocoder_name=VOCODER_NAME, is_local=False, device=DEVICE)
 
-    # 3. Model 로드 (한 번만 수행)
+    # 3. Model 로드
     print(f"Loading Model ({MODEL_NAME}) from {CKPT_FILE}...")
     try:
-        # F5-TTS 패키지 내의 config 파일 경로 찾기
+        # config 파일 경로
         model_cfg_path = str(files("f5_tts").joinpath(f"configs/{MODEL_NAME}.yaml"))
         model_cfg = OmegaConf.load(model_cfg_path)
     except Exception as e:
@@ -65,14 +64,14 @@ def main():
         mel_spec_type=VOCODER_NAME,
         vocab_file=VOCAB_FILE,
         device=DEVICE,
+        use_n2gk_plus=USE_N2GK_PLUS,
     )
 
-    # 4. Reference Audio 전처리 (한 번만 수행)
-    # Bash 예시에서는 모든 합성에 동일한 레퍼런스 오디오/텍스트를 사용하는 것으로 보임
+    # 4. Reference Audio 전처리
     print("Processing Reference Audio...")
     ref_audio, ref_text = preprocess_ref_audio_text(REF_AUDIO_PATH, REF_TEXT_CONTENT)
 
-    # 5. Transcript 파일 읽기 및 루프 수행
+    # 5. Transcript 파일 읽기
     print(f"Reading transcript from {TRANSCRIPT_PATH}...")
     with open(TRANSCRIPT_PATH, "r", encoding="utf-8") as f:
         lines = f.readlines()
@@ -88,9 +87,7 @@ def main():
         if len(parts) < 1:
             continue
 
-        # 요청하신 파싱 로직 적용
-        # 주의: parts[0]이 파일명이자 텍스트로 지정됨 (요구사항 준수)
-        # 만약 텍스트가 parts[1]에 있다면 parts[1]로 변경 필요
+        # KSS 전용
         filename_base = parts[0].split('/')[-1]
         gen_text = parts[2] 
         
@@ -103,7 +100,7 @@ def main():
         print(f"[{count+1}/{max_count}] Generating: {output_filename}")
         print(f" - Text: {gen_text}")
 
-        # 6. 추론 (Inference)
+        # 6. Inference
         try:
             audio_segment, final_sample_rate, _ = infer_process(
                 ref_audio,
