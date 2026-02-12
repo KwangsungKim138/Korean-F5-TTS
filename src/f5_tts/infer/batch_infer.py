@@ -16,11 +16,11 @@ from f5_tts.infer.utils_infer import (
 )
 
 
-CKPT_FILE = "ckpts/ksalt-kss-finetune-a100/model_60000.pt"
+CKPT_FILE = "ckpts/F5TTS_Base_vocos_custom_KSS_n2gk_grapheme_lora/model_40000.pt"
 VOCAB_FILE = "ckpts/pretrained/vocab_pretr.txt"
 REF_AUDIO_PATH = "data/KSS/1/1_0001.wav"
 REF_TEXT_CONTENT = "그는 괜찮은 척하려고 애쓰는 것 같았다."
-OUTPUT_DIR = "eval/testaudio_ft_60K"
+OUTPUT_DIR = "tests/eval/testaudio_ft_40K_grapheme"
 TRANSCRIPT_PATH = "/home/waegari/projects/F5-TTS/data/KSS/test_for_eval.txt"
 MODEL_NAME = "F5TTS_Base"  # Bash 예시에 명시된 모델명
 DEVICE = "cuda"
@@ -28,6 +28,7 @@ DEVICE = "cuda"
 
 VOCODER_NAME = "vocos"
 USE_N2GK_PLUS = True  # N2gk+ before g2p/allophone (set False for models trained without N2gk+)
+TOKENIZER_TYPE = "kor_grapheme" # "kor_allophone" or "kor_grapheme" or "custom"
 TARGET_RMS = 0.1
 CROSS_FADE_DURATION = 0.15
 NFE_STEP = 32
@@ -65,6 +66,7 @@ def main():
         vocab_file=VOCAB_FILE,
         device=DEVICE,
         use_n2gk_plus=USE_N2GK_PLUS,
+        tokenizer=TOKENIZER_TYPE,
     )
 
     # 4. Reference Audio 전처리

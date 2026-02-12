@@ -301,16 +301,17 @@ def load_model(
     tokenizer_version=None,
     use_skip_tc=False,
     use_n2gk_plus=True,
+    tokenizer="custom",
 ):
     if vocab_file == "":
         vocab_file = str(files("f5_tts").joinpath("infer/examples/vocab.txt"))
-    tokenizer = "custom"
 
     print("\nvocab : ", vocab_file)
     print("token : ", tokenizer)
     print("model : ", ckpt_path, "\n")
 
-    vocab_char_map, vocab_size = get_tokenizer(vocab_file, tokenizer)
+    # Use "custom" to load vocab from the exact path provided in vocab_file
+    vocab_char_map, vocab_size = get_tokenizer(vocab_file, "custom")
     # +1 so model shape matches LoRA checkpoints trained with text_num_embeds=vocab_size+1
     text_num_embeds = vocab_size + 1
     model = CFM(
@@ -336,6 +337,8 @@ def load_model(
     model._use_skip_tc = use_skip_tc
     model._tokenizer_version_legacy = tokenizer_version in ("2026-02-07", "legacy")
     model._use_n2gk_plus = use_n2gk_plus
+    model._tokenizer_type = tokenizer
+    
     if use_skip_tc:
         print("Tokenizer: skipTC enabled" + (" (legacy 2026-02-07, token='')" if model._tokenizer_version_legacy else " (token='*')") + ".\n")
     if use_n2gk_plus:
@@ -548,12 +551,25 @@ def infer_batch_process(
         # Tokenizer: skipTC and legacy only from CLI (never from vocab)
         use_skip_tc = getattr(model_obj, "_use_skip_tc", False)
         use_legacy = getattr(model_obj, "_tokenizer_version_legacy", False)
+        use_n2gk = getattr(model_obj, "_use_n2gk_plus", True)
+        tokenizer_type = getattr(model_obj, "_tokenizer_type", "custom")
+
         if hasattr(model_obj, "vocab_char_map") and model_obj.vocab_char_map is not None:
             vocab = model_obj.vocab_char_map
 
-            # 1. Allophone
-            if any("ⁱ" in k or "ᶜ" in k or "ʲ" in k for k in vocab):
-                use_n2gk = getattr(model_obj, "_use_n2gk_plus", False)
+            # 1. Explicit Grapheme (kor_grapheme or similar)
+            if tokenizer_type == "kor_grapheme":
+                if use_n2gk:
+                    text_list = [normalize_n2gk_plus(t) for t in text_list]
+                if use_skip_tc:
+                    print("[Tokenizer] Korean Grapheme (skipTC)" + (" legacy" if use_legacy else "") + (" + N2gk+" if use_n2gk else ""))
+                    final_text_list = convert_char_to_grapheme_skipTC(text_list, legacy=use_legacy)
+                else:
+                    print("[Tokenizer] Korean Grapheme (Jamo)" + (" + N2gk+" if use_n2gk else ""))
+                    final_text_list = convert_char_to_grapheme(text_list)
+
+            # 2. Allophone (Explicit or Implicit by Vocab)
+            elif tokenizer_type == "kor_allophone" or any("ⁱ" in k or "ᶜ" in k or "ʲ" in k for k in vocab):
                 if use_n2gk:
                     text_list = [normalize_n2gk_plus(t) for t in text_list]
                 if use_skip_tc:
@@ -562,16 +578,20 @@ def infer_batch_process(
                 else:
                     print("[Tokenizer] Korean Allophone" + (" + N2gk+" if use_n2gk else ""))
                     final_text_list = convert_char_to_allophone(text_list)
-            # 2. Grapheme
+            
+            # 3. Grapheme (Implicit by Vocab)
             elif "ㅄ" in vocab:
+                if use_n2gk:
+                    text_list = [normalize_n2gk_plus(t) for t in text_list]
                 if use_skip_tc:
-                    print("[Tokenizer] Korean Grapheme (skipTC)" + (" legacy" if use_legacy else ""))
+                    print("[Tokenizer] Korean Grapheme (skipTC)" + (" legacy" if use_legacy else "") + (" + N2gk+" if use_n2gk else ""))
                     final_text_list = convert_char_to_grapheme_skipTC(text_list, legacy=use_legacy)
                 else:
-                    print("[Tokenizer] Korean Grapheme (Jamo)")
+                    print("[Tokenizer] Korean Grapheme (Jamo)" + (" + N2gk+" if use_n2gk else ""))
                     final_text_list = convert_char_to_grapheme(text_list)
-            # 3. Phoneme
-            elif "ㄱ" in vocab:
+            
+            # 4. Phoneme (Explicit or Implicit)
+            elif tokenizer_type == "kor_phoneme" or "ㄱ" in vocab:
                 if use_skip_tc:
                     print("[Tokenizer] Korean Phoneme (skipTC)" + (" legacy" if use_legacy else ""))
                     final_text_list = convert_char_to_phoneme_skipTC(text_list, legacy=use_legacy)
