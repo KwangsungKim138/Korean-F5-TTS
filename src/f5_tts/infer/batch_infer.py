@@ -16,13 +16,13 @@ from f5_tts.infer.utils_infer import (
 )
 
 
-CKPT_FILE = "ckpts/F5TTS_0209/model_450K.pt"
-VOCAB_FILE = "data/KSS_full_kor_allophone/vocab.txt"
+CKPT_FILE = "ckpts/ksalt-kss-finetune-a100/model_60000.pt"
+VOCAB_FILE = "ckpts/pretrained/vocab_pretr.txt"
 REF_AUDIO_PATH = "data/KSS/1/1_0001.wav"
 REF_TEXT_CONTENT = "그는 괜찮은 척하려고 애쓰는 것 같았다."
-OUTPUT_DIR = "eval/testaudio_450K"
+OUTPUT_DIR = "eval/testaudio_ft_60K"
 TRANSCRIPT_PATH = "/home/waegari/projects/F5-TTS/data/KSS/test_for_eval.txt"
-MODEL_NAME = "F5TTS_Small"  # Bash 예시에 명시된 모델명
+MODEL_NAME = "F5TTS_Base"  # Bash 예시에 명시된 모델명
 DEVICE = "cuda"
 
 

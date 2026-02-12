@@ -195,6 +195,50 @@ def transcribe(ref_audio, language=None):
 # load model checkpoint for inference
 
 
+def _convert_peft_state_dict_to_plain(state_dict: dict, lora_alpha: float = 32.0, lora_r: int = 16) -> dict:
+    """Convert PEFT/LoRA state_dict (base_model.model.*, base_layer, lora_A/B) to plain CFM state_dict."""
+    if not any(k.startswith("base_model.model.") for k in state_dict):
+        return state_dict
+
+    prefix = "base_model.model."
+    scale = lora_alpha / lora_r
+
+    # Strip prefix
+    plain = {}
+    for k, v in state_dict.items():
+        if not k.startswith(prefix):
+            continue
+        new_k = k[len(prefix) :]
+        plain[new_k] = v
+
+    # Merge LoRA into base_layer for attention linears (to_q, to_k, to_v, to_out.0)
+    merged_keys = set()
+    for k in list(plain.keys()):
+        if k.endswith(".base_layer.weight"):
+            base_key = k.replace(".base_layer.weight", ".weight")
+            lora_a_key = k.replace(".base_layer.weight", ".lora_A.default.weight")
+            lora_b_key = k.replace(".base_layer.weight", ".lora_B.default.weight")
+            if lora_a_key in plain and lora_b_key in plain:
+                w_base = plain[k]
+                lora_a = plain[lora_a_key]  # (r, in_features)
+                lora_b = plain[lora_b_key]  # (out_features, r)
+                delta = (lora_b @ lora_a).to(w_base.dtype) * scale
+                plain[base_key] = (w_base + delta).to(w_base.dtype)
+                merged_keys.add(k)
+                merged_keys.add(lora_a_key)
+                merged_keys.add(lora_b_key)
+        elif k.endswith(".base_layer.bias"):
+            base_key = k.replace(".base_layer.bias", ".bias")
+            if base_key not in plain:
+                plain[base_key] = plain[k]
+            merged_keys.add(k)
+
+    for k in merged_keys:
+        plain.pop(k, None)
+
+    return plain
+
+
 def load_checkpoint(model, ckpt_path, device: str, dtype=None, use_ema=True):
     if dtype is None:
         dtype = (
@@ -228,11 +272,13 @@ def load_checkpoint(model, ckpt_path, device: str, dtype=None, use_ema=True):
             if key in checkpoint["model_state_dict"]:
                 del checkpoint["model_state_dict"][key]
 
-        model.load_state_dict(checkpoint["model_state_dict"])
+        state = _convert_peft_state_dict_to_plain(checkpoint["model_state_dict"])
+        model.load_state_dict(state)
     else:
         if ckpt_type == "safetensors":
             checkpoint = {"model_state_dict": checkpoint}
-        model.load_state_dict(checkpoint["model_state_dict"])
+        state = _convert_peft_state_dict_to_plain(checkpoint["model_state_dict"])
+        model.load_state_dict(state)
 
     del checkpoint
     torch.cuda.empty_cache()
@@ -265,8 +311,10 @@ def load_model(
     print("model : ", ckpt_path, "\n")
 
     vocab_char_map, vocab_size = get_tokenizer(vocab_file, tokenizer)
+    # +1 so model shape matches LoRA checkpoints trained with text_num_embeds=vocab_size+1
+    text_num_embeds = vocab_size + 1
     model = CFM(
-        transformer=model_cls(**model_cfg, text_num_embeds=vocab_size, mel_dim=n_mel_channels),
+        transformer=model_cls(**model_cfg, text_num_embeds=text_num_embeds, mel_dim=n_mel_channels),
         mel_spec_kwargs=dict(
             n_fft=n_fft,
             hop_length=hop_length,
