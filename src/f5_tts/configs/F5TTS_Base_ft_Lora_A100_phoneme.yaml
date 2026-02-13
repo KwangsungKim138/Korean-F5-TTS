@@ -53,7 +53,7 @@ ckpts:
   pretrained_path: ckpts/pretrained/model_pretrained_1200000.pt  # base weights for LoRA
   logger: wandb
   log_samples: True
-  save_per_updates: 2000
+  save_per_updates: 5000
   keep_last_n_checkpoints: 5
-  last_per_updates: 500
+  last_per_updates: 2500
   save_dir: ckpts/${model.name}_${model.mel_spec.mel_spec_type}_${model.tokenizer}_${datasets.name}_lora
