@@ -83,7 +83,6 @@ def main() -> None:
     parser.add_argument("--n2gk-natural", action="store_true", default=True, help="N2gk+ natural=True (default).")
     # SkipTC options
     parser.add_argument("--skip-tc", action="store_true", help="Add SkipTC token at syllable boundary.")
-    parser.add_argument("--tokenizer_version", type=str, default=None, help="Legacy skipTC option.")
     
     args = parser.parse_args()
 
@@ -114,7 +113,6 @@ def main() -> None:
         print(f"Input: transcript {transcript_path}")
 
     use_skip_tc = getattr(args, "skip_tc", False)
-    use_legacy = args.tokenizer_version in ("2026-02-07", "legacy") if use_skip_tc else False
     
     print(f"Output: {save_dir}")
     print(f"Pipeline: N2gk+ -> Grapheme (SkipTC={use_skip_tc})\n")
@@ -135,7 +133,7 @@ def main() -> None:
         # 2. Convert to Grapheme
         try:
             if use_skip_tc:
-                grapheme_list = convert_char_to_grapheme_skipTC([normalized], legacy=use_legacy)[0]
+                grapheme_list = convert_char_to_grapheme_skipTC([normalized])[0]
             else:
                 grapheme_list = convert_char_to_grapheme([normalized])[0]
         except Exception as e:
@@ -158,7 +156,7 @@ def main() -> None:
     )
     vocab_set.discard("")
     
-    if use_skip_tc and not use_legacy:
+    if use_skip_tc:
         vocab_set.add("*")
         
     vocab_list = [" "] + sorted(vocab_set)

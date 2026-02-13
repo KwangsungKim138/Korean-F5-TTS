@@ -256,11 +256,11 @@ def convert_char_to_allophone(text_list: list[str]) -> list[list[str]]:
 
 
 def convert_char_to_allophone_skipTC(
-    text_list: list[str], legacy: bool = False
+    text_list: list[str]
 ) -> list[list[str]]:
-    """Korean allophone with SkipTC. legacy=True: use '' (2026-02-07). Else use '*'."""
+    """Korean allophone with SkipTC (use '*')."""
     return _convert_char_to_allophone_impl(
-        text_list, add_empty_jong=True, skip_tc_token="" if legacy else SKIPTC_TOKEN
+        text_list, add_empty_jong=True, skip_tc_token=SKIPTC_TOKEN
     )
 
 
@@ -292,12 +292,12 @@ def _convert_char_to_allophone_impl(
 
 
 def convert_char_to_grapheme_skipTC(
-    text_list: list[str], legacy: bool = False
+    text_list: list[str]
 ) -> list[list[str]]:
     """
-    Korean Grapheme (Jamo) with SkipTC. legacy=True: use '' (2026-02-07). Else use '*'.
+    Korean Grapheme (Jamo) with SkipTC (use '*').
     """
-    token = "" if legacy else SKIPTC_TOKEN
+    token = SKIPTC_TOKEN
     final_text_list = []
     for text in text_list:
         result = []
@@ -330,12 +330,12 @@ def convert_char_to_grapheme(text_list: list[str]) -> list[list[str]]:
 
 
 def convert_char_to_phoneme_skipTC(
-    text_list: list[str], legacy: bool = False
+    text_list: list[str]
 ) -> list[list[str]]:
     """
-    Korean Phoneme with SkipTC. legacy=True: use '' (2026-02-07). Else use '*' for empty coda.
+    Korean Phoneme with SkipTC (use '*' for empty coda).
     """
-    token = "" if legacy else SKIPTC_TOKEN
+    token = SKIPTC_TOKEN
     final_text_list = []
     for text in text_list:
         result = []

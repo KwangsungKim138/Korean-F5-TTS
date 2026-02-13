@@ -43,12 +43,6 @@ def main() -> None:
         action="store_true",
         help="Add SkipTC token at syllable boundary (empty coda). Default: no skipTC.",
     )
-    parser.add_argument(
-        "--tokenizer_version",
-        type=str,
-        default=None,
-        help="Only if --skip-tc: use '2026-02-07' or 'legacy' for skipTC as ''; omit for '*'.",
-    )
     args = parser.parse_args()
 
     project_root = Path(os.getcwd())
@@ -60,9 +54,8 @@ def main() -> None:
     save_dir = data_root / f"{dataset_name}_{tokenizer_type}"
 
     use_skip_tc = getattr(args, "skip_tc", False)
-    use_legacy = args.tokenizer_version in ("2026-02-07", "legacy") if use_skip_tc else False
     if use_skip_tc:
-        tok_ver_str = "legacy (2026-02-07, skipTC='')" if use_legacy else "skipTC=*"
+        tok_ver_str = "skipTC=*"
     else:
         tok_ver_str = "no skipTC (default)"
     print(f"\nPrepare for {dataset_name} with {tokenizer_type} tokenizer")
@@ -93,7 +86,7 @@ def main() -> None:
         set(PHONEME_CONSONANTS) | set(PHONEME_VOWELS) | punctuation_set
     )
     vocab_set.discard("")
-    if use_skip_tc and not use_legacy:
+    if use_skip_tc:
         vocab_set.add("*")
 
     result = []
@@ -128,7 +121,7 @@ def main() -> None:
         # Convert to phonemes
         try:
             if use_skip_tc:
-                phoneme_tokens = convert_char_to_phoneme_skipTC([text_content], legacy=use_legacy)[0]
+                phoneme_tokens = convert_char_to_phoneme_skipTC([text_content])[0]
             else:
                 phoneme_tokens = convert_char_to_phoneme([text_content])[0]
         except Exception as e:

@@ -298,7 +298,6 @@ def load_model(
     ode_method=ode_method,
     use_ema=True,
     device=device,
-    tokenizer_version=None,
     use_skip_tc=False,
     use_n2gk_plus=True,
     tokenizer="custom",
@@ -335,12 +334,11 @@ def load_model(
 
     # SkipTC and legacy: only from CLI, never from vocab
     model._use_skip_tc = use_skip_tc
-    model._tokenizer_version_legacy = tokenizer_version in ("2026-02-07", "legacy")
     model._use_n2gk_plus = use_n2gk_plus
     model._tokenizer_type = tokenizer
     
     if use_skip_tc:
-        print("Tokenizer: skipTC enabled" + (" (legacy 2026-02-07, token='')" if model._tokenizer_version_legacy else " (token='*')") + ".\n")
+        print("Tokenizer: skipTC enabled (token='*').\n")
     if use_n2gk_plus:
         print("Tokenizer: N2gk+ (Korean text normalization) enabled before g2p/allophone.\n")
 
