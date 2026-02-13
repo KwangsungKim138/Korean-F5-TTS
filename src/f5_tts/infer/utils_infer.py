@@ -592,11 +592,13 @@ def infer_batch_process(
             
             # 4. Phoneme (Explicit or Implicit)
             elif tokenizer_type == "kor_phoneme" or "ㄱ" in vocab:
+                if use_n2gk:
+                    text_list = [normalize_n2gk_plus(t) for t in text_list]
                 if use_skip_tc:
-                    print("[Tokenizer] Korean Phoneme (skipTC)" + (" legacy" if use_legacy else ""))
+                    print("[Tokenizer] Korean Phoneme (skipTC)" + (" legacy" if use_legacy else "") + (" + N2gk+" if use_n2gk else ""))
                     final_text_list = convert_char_to_phoneme_skipTC(text_list, legacy=use_legacy)
                 else:
-                    print("[Tokenizer] Korean Phoneme (Standard G2P)")
+                    print("[Tokenizer] Korean Phoneme (Standard G2P)" + (" + N2gk+" if use_n2gk else ""))
                     final_text_list = convert_char_to_phoneme(text_list)
             # 4. Default Pinyin
             else:

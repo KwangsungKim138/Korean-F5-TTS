@@ -1,4 +1,4 @@
-# LoRA fine-tuning: pretrained base + vocab_pretr + Grapheme (Jamo) dataset.
+# LoRA fine-tuning: pretrained base + vocab_pretr + N2gk+ -> g2p -> allophone dataset.
 # See README or train/README.md for step-by-step.
 
 hydra:
@@ -6,8 +6,8 @@ hydra:
     dir: ckpts/${model.name}_${model.mel_spec.mel_spec_type}_${model.tokenizer}_${datasets.name}_lora/${now:%Y-%m-%d}/${now:%H-%M-%S}
 
 datasets:
-  name: KSS_n2gk_grapheme  # used for save_dir naming
-  load_path: data/KSS_n2gk_grapheme  # N2gk+ -> Grapheme prepared data (raw.arrow, duration.json from prepare_kss_n2gk_grapheme.py)
+  name: KSS_n2gk_allophone  # used for save_dir naming; actual data path = load_path if set
+  load_path: data/KSS_n2gk_allophone  # N2gk+ -> g2p -> allophone prepared data (raw.arrow, duration.json, vocab from prepare_kss_n2gk_allophone)
   batch_size_per_gpu: 19200
   batch_size_type: frame
   max_samples: 64
@@ -23,8 +23,8 @@ optim:
 
 model:
   name: F5TTS_Base
-  tokenizer: KSS_n2gk_grapheme  # use tokenizer_path for vocab
-  tokenizer_path: ckpts/pretrained/vocab_pretr.txt  # Ensure this vocab contains Korean Jamos!
+  tokenizer: KSS_n2gk_allophone  # use tokenizer_path for vocab
+  tokenizer_path: ckpts/pretrained/vocab_pretr.txt
   backbone: DiT
   arch:
     dim: 1024

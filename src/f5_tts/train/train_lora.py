@@ -20,7 +20,7 @@ from f5_tts.model.utils import get_tokenizer
 # LoRA defaults (CoreaSpeech-style)
 LORA_R = 16
 LORA_ALPHA = 32
-LORA_TARGET_MODULES = ["to_q", "to_k", "to_v", "to_out.0"]  # DiT attention linears
+LORA_TARGET_MODULES = ["to_q", "to_k", "to_v", "to_out.0", "input_embed.proj"]  # DiT attention linears + Input Projection
 
 
 def _load_pretrained_into_model(model: torch.nn.Module, ckpt_path: str) -> None:
@@ -115,12 +115,23 @@ def main(model_cfg):
     lora_r = model_cfg.ckpts.get("lora_r", LORA_R)
     lora_alpha = model_cfg.ckpts.get("lora_alpha", LORA_ALPHA)
     lora_targets = model_cfg.ckpts.get("lora_target_modules", LORA_TARGET_MODULES)
+
+    # Ensure input_embed.proj is in targets for prompt adapter
+    if "input_embed.proj" not in lora_targets:
+        lora_targets.append("input_embed.proj")
+
+    # Define rank pattern: 64 for prompt adapter, lora_r (16) for others
+    rank_pattern = {"input_embed.proj": 64}
+    alpha_pattern = {"input_embed.proj": 128}  # Maintain alpha/r ratio (32/16 = 2 -> 128/64 = 2)
+
     lora_config = LoraConfig(
         r=lora_r,
         lora_alpha=lora_alpha,
         target_modules=lora_targets,
-        lora_dropout=0.0,
+        lora_dropout=0.05,  # Add slight dropout for regularization (akin to DropPath effect)
         bias="none",
+        rank_pattern=rank_pattern,
+        alpha_pattern=alpha_pattern,
     )
     model = get_peft_model(model, lora_config)
 

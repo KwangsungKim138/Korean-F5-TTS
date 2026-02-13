@@ -1,4 +1,4 @@
-# LoRA fine-tuning: pretrained base + vocab_pretr + N2gk+ -> g2p -> allophone dataset.
+# LoRA fine-tuning: pretrained base + vocab_pretr + Phoneme dataset.
 # See README or train/README.md for step-by-step.
 
 hydra:
@@ -6,12 +6,12 @@ hydra:
     dir: ckpts/${model.name}_${model.mel_spec.mel_spec_type}_${model.tokenizer}_${datasets.name}_lora/${now:%Y-%m-%d}/${now:%H-%M-%S}
 
 datasets:
-  name: KSS_n2gk_allophone  # used for save_dir naming; actual data path = load_path if set
-  load_path: data/KSS_n2gk_allophone  # N2gk+ -> g2p -> allophone prepared data (raw.arrow, duration.json, vocab from prepare_kss_n2gk_allophone)
+  name: KSS_n2gk_phoneme  # used for save_dir naming
+  load_path: data/KSS_n2gk_phoneme  # N2gk+ -> Phoneme prepared data (raw.arrow, duration.json from prepare_kss_n2gk_phoneme.py)
   batch_size_per_gpu: 19200
   batch_size_type: frame
   max_samples: 64
-  num_workers: 16
+  num_workers: 8
 
 optim:
   epochs: 20000
@@ -51,12 +51,9 @@ model:
 
 ckpts:
   pretrained_path: ckpts/pretrained/model_pretrained_1200000.pt  # base weights for LoRA
-  lora_r: 16   # CoreaSpeech/NeurIPS 2025
-  lora_alpha: 32
-  lora_target_modules: ["to_q", "to_k", "to_v", "to_out.0"]
   logger: wandb
   log_samples: True
   save_per_updates: 2000
-  keep_last_n_checkpoints: -1
+  keep_last_n_checkpoints: 5
   last_per_updates: 500
   save_dir: ckpts/${model.name}_${model.mel_spec.mel_spec_type}_${model.tokenizer}_${datasets.name}_lora

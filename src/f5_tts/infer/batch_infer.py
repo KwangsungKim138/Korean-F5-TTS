@@ -16,11 +16,11 @@ from f5_tts.infer.utils_infer import (
 )
 
 
-CKPT_FILE = "ckpts/F5TTS_Base_vocos_custom_KSS_n2gk_grapheme_lora/model_40000.pt"
+CKPT_FILE = "tests/model_60K_grp.pt"
 VOCAB_FILE = "ckpts/pretrained/vocab_pretr.txt"
 REF_AUDIO_PATH = "data/KSS/1/1_0001.wav"
-REF_TEXT_CONTENT = "그는 괜찮은 척하려고 애쓰는 것 같았다."
-OUTPUT_DIR = "tests/eval/testaudio_ft_40K_grapheme"
+REF_TEXT_CONTENT = "그녀의 사랑을 얻기 위해 애썼지만, 헛수고였다."
+OUTPUT_DIR = "tests/eval/testaudio_ft_60K_grapheme"
 TRANSCRIPT_PATH = "/home/waegari/projects/F5-TTS/data/KSS/test_for_eval.txt"
 MODEL_NAME = "F5TTS_Base"  # Bash 예시에 명시된 모델명
 DEVICE = "cuda"
