@@ -23,7 +23,7 @@ optim:
 
 model:
   name: F5TTS_Base
-  tokenizer: kor_grapheme  # use tokenizer_path for vocab
+  tokenizer: custom  # use tokenizer_path for vocab
   tokenizer_path: ckpts/pretrained/vocab_pretr.txt  # Ensure this vocab contains Korean Jamos!
   backbone: DiT
   arch:
