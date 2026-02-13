@@ -23,7 +23,7 @@ optim:
 
 model:
   name: F5TTS_Base
-  tokenizer: custom  # use tokenizer_path for vocab
+  tokenizer: kor_phoneme  # use tokenizer_path for vocab
   tokenizer_path: ckpts/pretrained/vocab_pretr.txt
   backbone: DiT
   arch:

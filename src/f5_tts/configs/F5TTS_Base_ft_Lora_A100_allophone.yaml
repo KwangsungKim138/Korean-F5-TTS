@@ -23,7 +23,7 @@ optim:
 
 model:
   name: F5TTS_Base
-  tokenizer: KSS_n2gk_allophone  # use tokenizer_path for vocab
+  tokenizer: kor_allophone  # use tokenizer_path for vocab
   tokenizer_path: ckpts/pretrained/vocab_pretr.txt
   backbone: DiT
   arch:
