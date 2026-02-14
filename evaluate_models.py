@@ -208,10 +208,36 @@ def run_evaluation():
         output_dir = os.path.join(OUTPUT_BASE_DIR, model_name)
         os.makedirs(output_dir, exist_ok=True)
         
+        details_path = os.path.join(output_dir, "details.csv")
+        
         # ---------------------------------------------------------
-        # A. Audio Generation / Preparation
+        # Check for existing results to skip evaluation
         # ---------------------------------------------------------
-        files_to_eval = [] # List of (path, gt_text)
+        if os.path.exists(details_path):
+            print(f"  [Skipping Generation & Eval] Found existing results: {details_path}")
+            try:
+                df = pd.read_csv(details_path)
+                # Ensure string columns are strings (pandas might interpret empty strings as NaN)
+                for col in ['gt_ns', 'pred_ns', 'gt_clean', 'pred_clean']:
+                    if col in df.columns:
+                        df[col] = df[col].fillna("").astype(str)
+                
+                # Verify essential columns exist
+                required_cols = ['gt_ns', 'pred_ns', 'gt_clean', 'pred_clean', 'utmos', 'cer']
+                if not all(col in df.columns for col in required_cols):
+                    print("  Warning: details.csv missing required columns. Re-evaluating...")
+                    df = None
+            except Exception as e:
+                print(f"  Error reading details.csv: {e}. Re-evaluating...")
+                df = None
+        else:
+            df = None
+
+        if df is None:
+            # ---------------------------------------------------------
+            # A. Audio Generation / Preparation
+            # ---------------------------------------------------------
+            files_to_eval = [] # List of (path, gt_text)
 
         # ==========================================
         # CASE 1: Ground Truth
@@ -360,71 +386,73 @@ def run_evaluation():
             # Filter files that actually exist (in case generation failed)
             files_to_eval = [f for f in files_to_eval if os.path.exists(f[0])]
 
-        # ---------------------------------------------------------
-        # B. Evaluation Loop (UTMOS + CER + WER)
-        # ---------------------------------------------------------
-        if not files_to_eval:
-            print("No files to evaluate.")
-            continue
+            # ---------------------------------------------------------
+            # B. Evaluation Loop (UTMOS + CER + WER)
+            # ---------------------------------------------------------
+            if not files_to_eval:
+                print("No files to evaluate.")
+                continue
 
-        print(f"  Evaluating metrics for {len(files_to_eval)} files...")
-        
-        results = []
-        
-        gt_texts_no_space = [] # For Global CER
-        pred_texts_no_space = []
-        gt_texts_list = [] # For Global WER
-        pred_texts_list = []
-
-        for audio_path, raw_gt_text in tqdm(files_to_eval, desc="Evaluating"):
-            # 1. UTMOS
-            try:
-                import librosa
-                wav, sr = librosa.load(audio_path, sr=None, mono=True)
-                wav_tensor = torch.from_numpy(wav).to(DEVICE).unsqueeze(0)
-                with torch.no_grad():
-                    utmos_score = utmos_predictor(wav_tensor, sr).item()
-            except:
-                utmos_score = 0.0
-
-            # 2. Whisper ASR
-            try:
-                asr_res = whisper_model.transcribe(audio_path, language='ko', temperature=0.0)
-                raw_pred_text = asr_res['text']
-            except Exception as e:
-                print(f"ASR Error {audio_path}: {e}")
-                raw_pred_text = ""
-
-            # 3. Post-process (N2gk+ -> Clean)
-            # GT
-            gt_n2gk = normalize_n2gk_plus(raw_gt_text)
-            gt_final = post_process_for_metric(gt_n2gk)
-            gt_final_ns = gt_final.replace(' ', '') # No space
+            print(f"  Evaluating metrics for {len(files_to_eval)} files...")
             
-            # Pred
-            pred_n2gk = normalize_n2gk_plus(raw_pred_text)
-            pred_final = post_process_for_metric(pred_n2gk)
-            pred_final_ns = pred_final.replace(' ', '') # No space
-
-            # 4. Calculate Individual Metrics
-            cer = min(1.0, jiwer.cer(gt_final_ns, pred_final_ns)) if gt_final_ns else 1.0
-            wer = min(1.0, jiwer.wer(gt_final, pred_final)) if gt_final else 1.0
+            results = []
             
-            results.append({
-                "filename": os.path.basename(audio_path),
-                "utmos": utmos_score,
-                "cer": cer,
-                "wer": wer,
-                "gt_ns": gt_final_ns, # Saved for micro-avg calculation
-                "pred_ns": pred_final_ns,
-                "gt_clean": gt_final,
-                "pred_clean": pred_final
-            })
+            gt_texts_no_space = [] # For Global CER
+            pred_texts_no_space = []
+            gt_texts_list = [] # For Global WER
+            pred_texts_list = []
 
-        # ---------------------------------------------------------
-        # C. Statistics & Summary
-        # ---------------------------------------------------------
-        df = pd.DataFrame(results)
+            for audio_path, raw_gt_text in tqdm(files_to_eval, desc="Evaluating"):
+                # 1. UTMOS
+                try:
+                    import librosa
+                    wav, sr = librosa.load(audio_path, sr=None, mono=True)
+                    wav_tensor = torch.from_numpy(wav).to(DEVICE).unsqueeze(0)
+                    with torch.no_grad():
+                        utmos_score = utmos_predictor(wav_tensor, sr).item()
+                except:
+                    utmos_score = 0.0
+
+                # 2. Whisper ASR
+                try:
+                    asr_res = whisper_model.transcribe(audio_path, language='ko', temperature=0.0)
+                    raw_pred_text = asr_res['text']
+                except Exception as e:
+                    print(f"ASR Error {audio_path}: {e}")
+                    raw_pred_text = ""
+
+                # 3. Post-process (N2gk+ -> Clean)
+                # GT
+                gt_n2gk = normalize_n2gk_plus(raw_gt_text)
+                gt_final = post_process_for_metric(gt_n2gk)
+                gt_final_ns = gt_final.replace(' ', '') # No space
+                
+                # Pred
+                pred_n2gk = normalize_n2gk_plus(raw_pred_text)
+                pred_final = post_process_for_metric(pred_n2gk)
+                pred_final_ns = pred_final.replace(' ', '') # No space
+
+                # 4. Calculate Individual Metrics
+                cer = min(1.0, jiwer.cer(gt_final_ns, pred_final_ns)) if gt_final_ns else 1.0
+                wer = min(1.0, jiwer.wer(gt_final, pred_final)) if gt_final else 1.0
+                
+                results.append({
+                    "filename": os.path.basename(audio_path),
+                    "utmos": utmos_score,
+                    "cer": cer,
+                    "wer": wer,
+                    "gt_ns": gt_final_ns, # Saved for micro-avg calculation
+                    "pred_ns": pred_final_ns,
+                    "gt_clean": gt_final,
+                    "pred_clean": pred_final
+                })
+
+            # ---------------------------------------------------------
+            # C. Statistics & Summary
+            # ---------------------------------------------------------
+            df = pd.DataFrame(results)
+            # Save Details
+            df.to_csv(os.path.join(output_dir, "details.csv"), index=False, encoding="utf-8-sig")
         
         # 1. Global Metrics (Micro-average using jiwer on full list)
         global_cer = min(1.0, jiwer.cer(df['gt_ns'].tolist(), df['pred_ns'].tolist()))
