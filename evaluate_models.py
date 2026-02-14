@@ -1,5 +1,10 @@
 import os
 import sys
+import warnings
+
+# Filter cudnn warnings
+warnings.filterwarnings("ignore", message="Plan failed with a cudnnException")
+
 import torch
 import torchaudio
 import soundfile as sf
@@ -36,8 +41,25 @@ except ImportError:
 # Configuration
 # --------------------------
 
-model_steps_k = list(range(10, 105, 5)) # 10, 15, ..., 100
-tokenizer_modes = ["grapheme", "phoneme", "allophone"]
+grapheme_steps_k = {
+    "mode": "grapheme",
+    "inference": list(range(50, 60, 5)),
+    "existing": list(range(10, 50, 5)),
+    }
+
+phoneme_steps_k = {
+    "mode": "phoneme",
+    "inference": list(range(10, 60, 5)),
+    "existing": [],
+    }
+
+allophone_steps_k = {
+    "mode": "allophone",
+    "inference": list(range(10, 60, 5)),
+    "existing": [],
+    }
+
+eval_models = [grapheme_steps_k, phoneme_steps_k, allophone_steps_k]
 
 # Define the models to evaluate
 # type: "inference" (default) | "existing" | "ground_truth"
@@ -54,16 +76,15 @@ MODELS = [
 ]
 
 # Generate model entries dynamically
-for mode in tokenizer_modes:
+for model in eval_models:
     # Set paths based on mode
-    if mode == "allophone":
-        ckpt_folder = "ckpts/F5TTS_Base_vocos_custom_KSS_n2gk_allophone_lora" 
-    elif mode == "phoneme":
-        ckpt_folder = "ckpts/F5TTS_Base_vocos_custom_KSS_n2gk_phoneme_lora"
-    else: # grapheme
-        ckpt_folder = "ckpts/F5TTS_Base_vocos_custom_KSS_n2gk_grapheme_lora"
+    mode = model["mode"]
+    inf = model["inference"]
+    existing = model["existing"]
+    
+    ckpt_folder = f"ckpts/F5TTS_Base_vocos_custom_KSS_n2gk_{mode}_lora"
 
-    for step in model_steps_k:
+    for step in inf:
         MODELS.append({
             "type": "inference",
             "name": f"{mode}_{step}K",
@@ -71,6 +92,13 @@ for mode in tokenizer_modes:
             "vocab_file": "ckpts/pretrained/vocab_pretr.txt",
             "model_cfg": f"src/f5_tts/configs/F5TTS_Base_ft_Lora_A100_{mode}.yaml",
             "tokenizer": f"kor_{mode}"
+        })
+        
+    for step in existing:
+        MODELS.append({
+            "type": "existing",
+            "name": f"{mode}_{step}K",
+            "path": f"eval_results/{mode}_{step}K",
         })
 
 # Settings
