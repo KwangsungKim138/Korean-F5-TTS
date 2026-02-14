@@ -172,7 +172,7 @@ def main(model_cfg):
             "lora_r": lora_r,
             "lora_alpha": lora_alpha,
         },
-        resume_from_checkpoint=False,
+        resume_from_checkpoint=model_cfg.ckpts.get("resume_from_checkpoint", None),
     )
 
     dataset_type = getattr(model_cfg.datasets, "dataset_type", "CustomDataset")
