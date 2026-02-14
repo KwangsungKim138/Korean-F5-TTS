@@ -57,19 +57,16 @@ MODELS = [
 for mode in tokenizer_modes:
     # Set paths based on mode
     if mode == "allophone":
-        vocab_path = "data/KSS_n2gk_allophone/vocab.txt"
-        # Checkpoint folder pattern might vary, assuming consistent naming convention
         ckpt_folder = "ckpts/F5TTS_Base_vocos_custom_KSS_n2gk_allophone_lora" 
     elif mode == "phoneme":
-        vocab_path = "data/KSS/vocab.txt"
         ckpt_folder = "ckpts/F5TTS_Base_vocos_custom_KSS_n2gk_phoneme_lora"
     else: # grapheme
-        vocab_path = "data/KSS/vocab.txt"
         ckpt_folder = "ckpts/F5TTS_Base_vocos_custom_KSS_n2gk_grapheme_lora"
 
     for step in model_steps_k:
         MODELS.append({
             "type": "inference",
+            "vocab_path": "ckpts/pretrained/vocab_pretr.txt",
             "name": f"{mode}_{step}K",
             "ckpt_path": f"{ckpt_folder}/model_{step}000.pt",
             "vocab_file": vocab_path,
