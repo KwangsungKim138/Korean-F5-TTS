@@ -7,6 +7,10 @@ import argparse
 from tqdm import tqdm
 from pathlib import Path
 import numpy as np
+import pandas as pd
+import whisper
+import jiwer
+import re
 from omegaconf import OmegaConf
 from hydra.utils import get_class
 
@@ -19,6 +23,14 @@ from f5_tts.infer.utils_infer import (
     infer_process,
     preprocess_ref_audio_text,
 )
+
+# N2gk+ normalization import
+try:
+    from f5_tts.train.datasets.normalization_n2gk import normalize_n2gk_plus
+    print("✅ N2gkPlus normalization module loaded successfully.")
+except ImportError:
+    print("❌ Warning: 'normalization_n2gk.py' not found. Normalization will be skipped.")
+    def normalize_n2gk_plus(text): return text
 
 # --------------------------
 # Configuration
@@ -47,7 +59,8 @@ MODELS = [
         "tokenizer": "kor_grapheme"
     },
     {
-        "type": "inference",
+        "type": "existing",
+        "path": "eval_results/F5TTS_Lora_A100_grapheme_60K",
         "name": "F5TTS_Lora_A100_grapheme_60K",
         "ckpt_path": "tests/model_60K_grp.pt",
         "vocab_file": "ckpts/pretrained/vocab_pretr.txt",
@@ -71,20 +84,12 @@ MODELS = [
     # }
 ]
 
-# Test set path
+# Settings
 TEST_SET_PATH = "data/KSS/test.txt"
+# If not exists, check fallback... (생략, 기존 로직 유지)
 if not os.path.exists(TEST_SET_PATH):
-    fallback = "data/KSS/eval/test.txt"
-    if os.path.exists(fallback):
-        print(f"Warning: {TEST_SET_PATH} not found. Using {fallback} instead.")
-        TEST_SET_PATH = fallback
-    else:
-        print("Creating dummy test set for demonstration...")
-        os.makedirs("data/KSS/eval", exist_ok=True)
-        with open("data/KSS/eval/test.txt", "w") as f:
-            f.write("1_0001.wav|안녕하세요. 이것은 테스트 문장입니다.|안녕하세요. 이것은 테스트 문장입니다.\n")
-            f.write("1_0002.wav|F5-TTS 모델을 평가하고 있습니다.|에프오티티에스 모델을 평가하고 있습니다.\n")
-        TEST_SET_PATH = "data/KSS/eval/test.txt"
+    print(f"Warning: {TEST_SET_PATH} not found.")
+    throw
 
 OUTPUT_BASE_DIR = "eval_results"
 
@@ -100,13 +105,29 @@ CFG_STRENGTH = 2.0
 SWAY_SAMPLING_COEF = -1.0
 SPEED = 1.0
 
+# Whisper Settings
+WHISPER_SIZE = "large-v3"
+
+# --------------------------
+# Helper Functions
+# --------------------------
+
+def post_process_for_metric(text):
+    """get_cer_wer.py의 전처리 로직과 동일"""
+    # 특수문자 제거 (한글, 공백, 로마 알파벳, 숫자만)
+    text = re.sub(r'[^\w\s가-힣ㄱ-ㅎ]', '', text)
+    # 다중 공백을 단일 공백으로 치환
+    text = re.sub(r'\s+', ' ', text)
+    # Whisper 단골 hallucination
+    text = re.sub(r'((자막 제공 및\s)+광고를 포함하고 있습니다)|(이 영상은 한국국토정보공사의 자료입니다)', '', text).strip()
+    return text
+
 def load_test_sentences(path):
     items = []
     with open(path, "r", encoding="utf-8") as f:
         for line in f:
             line = line.strip()
             if not line: continue
-            
             parts = line.split("|")
             
             if len(parts) >= 3:
@@ -128,64 +149,71 @@ def load_test_sentences(path):
                 filename += ".wav"
                 
             items.append({
-                "filename_raw": filename_raw, # e.g., "1/1_0001.wav" (for GT)
-                "filename": filename,         # e.g., "1_0001.wav" (for saving)
+                "filename_raw": filename_raw,
+                "filename": filename,
                 "text": text
             })
     return items
 
 def run_evaluation():
-    # Load UTMOS predictor (Common)
+    # 1. Load UTMOS
     print("Loading UTMOS predictor...")
     try:
-        predictor = torch.hub.load("tarepan/SpeechMOS:v1.2.0", "utmos22_strong", trust_repo=True)
-        predictor = predictor.to(DEVICE)
+        utmos_predictor = torch.hub.load("tarepan/SpeechMOS:v1.2.0", "utmos22_strong", trust_repo=True)
+        utmos_predictor = utmos_predictor.to(DEVICE)
     except Exception as e:
-        print(f"Error loading UTMOS predictor: {e}")
+        print(f"Error loading UTMOS: {e}")
         return
 
-    # Load test sentences
+    # 2. Load Whisper
+    print(f"Loading Whisper model ({WHISPER_SIZE})...")
+    try:
+        whisper_model = whisper.load_model(WHISPER_SIZE, device=DEVICE)
+    except Exception as e:
+        print(f"Error loading Whisper: {e}")
+        return
+
+    # Load Test Items
     test_items = load_test_sentences(TEST_SET_PATH)
     print(f"Found {len(test_items)} test sentences.")
 
-    # Shared resources for inference
+    # Shared Resources
     vocoder = None
     ref_audio_processed = None
     ref_text_processed = None
     
-    results_summary = []
+    final_summary_rows = []
 
     for model_config in MODELS:
         model_name = model_config['name']
         model_type = model_config.get('type', 'inference')
-        print(f"\nProcessing Model: {model_name} (Type: {model_type})")
+        print(f"\n[{model_name}] Processing (Type: {model_type})...")
 
         output_dir = os.path.join(OUTPUT_BASE_DIR, model_name)
         os.makedirs(output_dir, exist_ok=True)
         
-        files_to_eval = [] # List of absolute paths to evaluate
+        # ---------------------------------------------------------
+        # A. Audio Generation / Preparation
+        # ---------------------------------------------------------
+        files_to_eval = [] # List of (path, gt_text)
 
         # ==========================================
         # CASE 1: Ground Truth
         # ==========================================
+        #  files_to_eval에 (audio_path, gt_text) 튜플을 저장
+        
         if model_type == "ground_truth":
             dataset_root = model_config.get('path', 'data/KSS')
             print(f"  Locating Ground Truth files in {dataset_root}...")
             
             found_count = 0
             for item in test_items:
-                # KSS test.txt filename_raw format: "1/1_0001.wav"
                 gt_path = os.path.join(dataset_root, item['filename_raw'])
+                if not os.path.exists(gt_path):
+                    gt_path = os.path.join(dataset_root, item['filename'])
                 if os.path.exists(gt_path):
-                    files_to_eval.append(gt_path)
+                    files_to_eval.append((gt_path, item['text']))
                     found_count += 1
-                else:
-                    # Try fallback without subdir if flat structure
-                    gt_path_flat = os.path.join(dataset_root, item['filename'])
-                    if os.path.exists(gt_path_flat):
-                        files_to_eval.append(gt_path_flat)
-                        found_count += 1
-            
             print(f"  Found {found_count}/{len(test_items)} Ground Truth files.")
 
         # ==========================================
@@ -204,7 +232,7 @@ def run_evaluation():
                 # Look for filename (basename) in the folder
                 target_path = os.path.join(existing_path, item['filename'])
                 if os.path.exists(target_path):
-                    files_to_eval.append(target_path)
+                    files_to_eval.append((target_path, item['text']))
                     found_count += 1
             
             print(f"  Found {found_count}/{len(test_items)} existing files.")
@@ -287,9 +315,9 @@ def run_evaluation():
                 output_file = os.path.join(output_dir, output_filename)
                 
                 # Add to evaluation list (whether newly generated or skipped)
-                files_to_eval.append(output_file)
                 
                 if os.path.exists(output_file):
+                     files_to_eval.append((output_file, gen_text))
                      continue
 
                 try:
@@ -309,54 +337,137 @@ def run_evaluation():
                         device=DEVICE,
                     )
                     sf.write(output_file, audio, sr)
+                    files_to_eval.append((output_file, gen_text))
                 except Exception as e:
                     print(f"    Error generating {output_filename}: {e}")
             
             # Filter files that actually exist (in case generation failed)
-            files_to_eval = [f for f in files_to_eval if os.path.exists(f)]
+            files_to_eval = [f for f in files_to_eval if os.path.exists(f[0])]
 
-        # ==========================================
-        # UTMOS Evaluation (Common)
-        # ==========================================
+        # ---------------------------------------------------------
+        # B. Evaluation Loop (UTMOS + CER + WER)
+        # ---------------------------------------------------------
         if not files_to_eval:
-            print("  No files to evaluate.")
-            results_summary.append(f"{model_name}: N/A (No files)")
+            print("No files to evaluate.")
             continue
 
-        print(f"  Running UTMOS evaluation on {len(files_to_eval)} files...")
-        utmos_scores = []
+        print(f"  Evaluating metrics for {len(files_to_eval)} files...")
         
-        for wav_path in tqdm(files_to_eval):
+        results = []
+        
+        gt_texts_no_space = [] # For Global CER
+        pred_texts_no_space = []
+        gt_texts_list = [] # For Global WER
+        pred_texts_list = []
+
+        for audio_path, raw_gt_text in tqdm(files_to_eval, desc="Evaluating"):
+            # 1. UTMOS
             try:
                 import librosa
-                wav, sr = librosa.load(wav_path, sr=None, mono=True)
+                wav, sr = librosa.load(audio_path, sr=None, mono=True)
                 wav_tensor = torch.from_numpy(wav).to(DEVICE).unsqueeze(0)
                 with torch.no_grad():
-                    score = predictor(wav_tensor, sr)
-                utmos_scores.append(score.item())
+                    utmos_score = utmos_predictor(wav_tensor, sr).item()
+            except:
+                utmos_score = 0.0
+
+            # 2. Whisper ASR
+            try:
+                asr_res = whisper_model.transcribe(audio_path, language='ko', temperature=0.0)
+                raw_pred_text = asr_res['text']
             except Exception as e:
-                print(f"Error evaluating {wav_path}: {e}")
+                print(f"ASR Error {audio_path}: {e}")
+                raw_pred_text = ""
 
-        avg_score = np.mean(utmos_scores) if utmos_scores else 0.0
-        print(f"  Model: {model_name} | UTMOS: {avg_score:.4f}")
-        results_summary.append(f"{model_name}: {avg_score:.4f}")
+            # 3. Post-process (N2gk+ -> Clean)
+            # GT
+            gt_n2gk = normalize_n2gk_plus(raw_gt_text)
+            gt_final = post_process_for_metric(gt_n2gk)
+            gt_final_ns = gt_final.replace(' ', '') # No space
+            
+            # Pred
+            pred_n2gk = normalize_n2gk_plus(raw_pred_text)
+            pred_final = post_process_for_metric(pred_n2gk)
+            pred_final_ns = pred_final.replace(' ', '') # No space
+
+            # 4. Calculate Individual Metrics
+            cer = min(1.0, jiwer.cer(gt_final_ns, pred_final_ns)) if gt_final_ns else 1.0
+            wer = min(1.0, jiwer.wer(gt_final, pred_final)) if gt_final else 1.0
+            
+            results.append({
+                "filename": os.path.basename(audio_path),
+                "utmos": utmos_score,
+                "cer": cer,
+                "wer": wer,
+                "gt_ns": gt_final_ns, # Saved for micro-avg calculation
+                "pred_ns": pred_final_ns,
+                "gt_clean": gt_final,
+                "pred_clean": pred_final
+            })
+
+        # ---------------------------------------------------------
+        # C. Statistics & Summary
+        # ---------------------------------------------------------
+        df = pd.DataFrame(results)
         
-        # Save result
-        with open(os.path.join(output_dir, "result.txt"), "w") as f:
-            f.write(f"UTMOS: {avg_score:.4f}\n")
-            if model_type == "inference":
-                f.write(f"Ref Audio: {REF_AUDIO}\n")
-                f.write(f"Ref Text: {REF_TEXT}\n")
-            f.write(f"Num Samples: {len(files_to_eval)}\n")
+        # 1. Global Metrics (Micro-average using jiwer on full list)
+        global_cer = min(1.0, jiwer.cer(df['gt_ns'].tolist(), df['pred_ns'].tolist()))
+        global_wer = min(1.0, jiwer.wer(df['gt_clean'].tolist(), df['pred_clean'].tolist()))
+        
+        mean_utmos = df['utmos'].mean()
 
-    print("\n=== Final Results ===")
-    for res in results_summary:
-        print(res)
+        # 2. SFR (Synthesis Failure Rate): CER > 0.5
+        fail_count = len(df[df['cer'] > 0.5])
+        total_count = len(df)
+        sfr = (fail_count / total_count) * 100 if total_count > 0 else 0.0
+
+        # 3. Valid CER (Micro-average using jiwer on valid list)
+        valid_df = df[df['cer'] <= 0.5]
+        if not valid_df.empty:
+            valid_mean_cer = min(1.0, jiwer.cer(valid_df['gt_ns'].tolist(), valid_df['pred_ns'].tolist()))
+        else:
+            valid_mean_cer = 0.0
+            
+        # 4. Worst Case
+        worst_row = df.loc[df['cer'].idxmax()] if not df.empty else None
+
+        # Print Model Summary
+        print(f"\n[Result: {model_name}]")
+        print(f"  UTMOS: {mean_utmos:.4f}")
+        print(f"  CER(Global): {global_cer:.4f}")
+        print(f"  WER: {global_wer:.4f}")
+        print(f"  CER(Valid): {valid_mean_cer:.4f}")
+        print(f"  SFR: {sfr:.2f}% ({fail_count}/{total_count} failed)")
+        
+        if worst_row is not None:
+            print(f"  Worst Case (CER: {worst_row['cer']:.4f}):")
+            print(f"    GT  : {worst_row['gt_clean']}")
+            print(f"    Pred: {worst_row['pred_clean']}")
+
+        # Save Details
+        df.to_csv(os.path.join(output_dir, "details.csv"), index=False, encoding="utf-8-sig")
+        
+        final_summary_rows.append({
+            "Model": model_name,
+            "CER(Global)": f"{global_cer:.4f}",
+            "WER": f"{global_wer:.4f}",
+            "CER(Valid)": f"{valid_mean_cer:.4f}",
+            "SFR (%)": f"{sfr:.2f}",
+            "UTMOS": f"{mean_utmos:.4f}",
+        })
+
+    # ---------------------------------------------------------
+    # D. Final Report Table
+    # ---------------------------------------------------------
+    print("\n" + "="*80)
+    print("FINAL EVALUATION SUMMARY")
+    print("="*80)
+    summary_df = pd.DataFrame(final_summary_rows)
+    print(summary_df.to_string(index=False))
     
-    # Save overall summary
-    with open(os.path.join(OUTPUT_BASE_DIR, "summary.txt"), "w") as f:
-        for res in results_summary:
-            f.write(res + "\n")
+    summary_path = os.path.join(OUTPUT_BASE_DIR, "final_summary.csv")
+    summary_df.to_csv(summary_path, index=False, encoding="utf-8-sig")
+    print(f"\nSummary saved to {summary_path}")
 
 if __name__ == "__main__":
     run_evaluation()
