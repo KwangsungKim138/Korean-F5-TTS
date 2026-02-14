@@ -248,143 +248,151 @@ def run_evaluation():
             dataset_root = model_config.get('path', 'data/KSS')
             print(f"  Locating Ground Truth files in {dataset_root}...")
             
-            found_count = 0
-            for item in test_items:
-                gt_path = os.path.join(dataset_root, item['filename_raw'])
-                if not os.path.exists(gt_path):
-                    gt_path = os.path.join(dataset_root, item['filename'])
-                if os.path.exists(gt_path):
-                    files_to_eval.append((gt_path, item['text']))
-                    found_count += 1
-            print(f"  Found {found_count}/{len(test_items)} Ground Truth files.")
+            # Ground Truth는 생성 과정이 없으므로, df가 있더라도 파일 개수 확인 로그를 위해
+            # 파일을 찾는 것이 좋을 수 있음. 하지만 시간 절약을 위해 df가 있으면 건너뜀.
+            
+            if df is None:
+                found_count = 0
+                for item in test_items:
+                    gt_path = os.path.join(dataset_root, item['filename_raw'])
+                    if not os.path.exists(gt_path):
+                        gt_path = os.path.join(dataset_root, item['filename'])
+                    if os.path.exists(gt_path):
+                        files_to_eval.append((gt_path, item['text']))
+                        found_count += 1
+                print(f"  Found {found_count}/{len(test_items)} Ground Truth files.")
+            else:
+                 print(f"  (Skipping file search due to existing results)")
 
         # ==========================================
         # CASE 2: Existing Folder
         # ==========================================
         elif model_type == "existing":
-            existing_path = model_config.get('path', '')
-            print(f"  Using existing audio files from {existing_path}...")
-            
-            if not os.path.exists(existing_path):
-                print(f"  Error: Directory {existing_path} does not exist.")
-                continue
+            if df is None:
+                existing_path = model_config.get('path', '')
+                print(f"  Using existing audio files from {existing_path}...")
                 
-            found_count = 0
-            for item in test_items:
-                # Look for filename (basename) in the folder
-                target_path = os.path.join(existing_path, item['filename'])
-                if os.path.exists(target_path):
-                    files_to_eval.append((target_path, item['text']))
-                    found_count += 1
-            
-            print(f"  Found {found_count}/{len(test_items)} existing files.")
+                if not os.path.exists(existing_path):
+                    print(f"  Error: Directory {existing_path} does not exist.")
+                    continue
+                    
+                found_count = 0
+                for item in test_items:
+                    # Look for filename (basename) in the folder
+                    target_path = os.path.join(existing_path, item['filename'])
+                    if os.path.exists(target_path):
+                        files_to_eval.append((target_path, item['text']))
+                        found_count += 1
+                
+                print(f"  Found {found_count}/{len(test_items)} existing files.")
 
         # ==========================================
         # CASE 3: Inference
         # ==========================================
         else: # type == "inference"
-            # Initialize shared resources if needed
-            if vocoder is None:
-                print(f"  Loading Vocoder ({VOCODER_NAME})...")
-                vocoder = load_vocoder(vocoder_name=VOCODER_NAME, is_local=False, device=DEVICE)
-            
-            if ref_audio_processed is None:
-                print("  Processing Reference Audio...")
-                if not os.path.exists(REF_AUDIO):
-                    print(f"  Error: Reference audio {REF_AUDIO} not found.")
-                    continue
-                try:
-                    ref_audio_processed, ref_text_processed = preprocess_ref_audio_text(REF_AUDIO, REF_TEXT)
-                except Exception as e:
-                    print(f"  Error processing reference audio: {e}")
-                    continue
+            if df is None:
+                # Initialize shared resources if needed
+                if vocoder is None:
+                    print(f"  Loading Vocoder ({VOCODER_NAME})...")
+                    vocoder = load_vocoder(vocoder_name=VOCODER_NAME, is_local=False, device=DEVICE)
+                
+                if ref_audio_processed is None:
+                    print("  Processing Reference Audio...")
+                    if not os.path.exists(REF_AUDIO):
+                        print(f"  Error: Reference audio {REF_AUDIO} not found.")
+                        continue
+                    try:
+                        ref_audio_processed, ref_text_processed = preprocess_ref_audio_text(REF_AUDIO, REF_TEXT)
+                    except Exception as e:
+                        print(f"  Error processing reference audio: {e}")
+                        continue
 
-            # Checkpoint check
-            ckpt_path = model_config['ckpt_path']
-            if not os.path.exists(ckpt_path):
-                print(f"  [Skipping] Checkpoint not found: {ckpt_path}")
-                parent_dir = os.path.dirname(ckpt_path)
-                if os.path.exists(parent_dir):
-                    pts = list(Path(parent_dir).rglob("*.pt"))
-                    if pts:
-                        print(f"  Found alternative checkpoint: {pts[0]}")
-                        ckpt_path = str(pts[0])
+                # Checkpoint check
+                ckpt_path = model_config['ckpt_path']
+                if not os.path.exists(ckpt_path):
+                    print(f"  [Skipping] Checkpoint not found: {ckpt_path}")
+                    parent_dir = os.path.dirname(ckpt_path)
+                    if os.path.exists(parent_dir):
+                        pts = list(Path(parent_dir).rglob("*.pt"))
+                        if pts:
+                            print(f"  Found alternative checkpoint: {pts[0]}")
+                            ckpt_path = str(pts[0])
+                        else:
+                            continue
                     else:
                         continue
-                else:
+
+                # Load Model
+                try:
+                    cfg_path = model_config.get("model_cfg", "")
+                    if cfg_path and os.path.exists(cfg_path):
+                        conf = OmegaConf.load(cfg_path)
+                        model_arch_config = conf.model.arch
+                        model_cls_name = conf.model.backbone
+                    else:
+                        print(f"  Warning: Config file {cfg_path} not found. Using default parameters.")
+                        model_arch_config = dict(dim=1024, depth=22, heads=16, ff_mult=2, text_dim=512, conv_layers=4)
+                        model_cls_name = "DiT"
+                    
+                    model_cls = get_class(f"f5_tts.model.{model_cls_name}")
+                    
+                    vocab_file = model_config.get('vocab_file', "")
+                    tokenizer_type = model_config.get('tokenizer', "custom")
+                    
+                    model = load_model(
+                        model_cls=model_cls,
+                        model_cfg=model_arch_config,
+                        ckpt_path=ckpt_path,
+                        mel_spec_type=VOCODER_NAME,
+                        vocab_file=vocab_file,
+                        device=DEVICE,
+                        use_ema=True,
+                        tokenizer=tokenizer_type,
+                        use_n2gk_plus=True
+                    )
+                except Exception as e:
+                    print(f"  Error loading model {model_name}: {e}")
+                    import traceback
+                    traceback.print_exc()
                     continue
 
-            # Load Model
-            try:
-                cfg_path = model_config.get("model_cfg", "")
-                if cfg_path and os.path.exists(cfg_path):
-                    conf = OmegaConf.load(cfg_path)
-                    model_arch_config = conf.model.arch
-                    model_cls_name = conf.model.backbone
-                else:
-                    print(f"  Warning: Config file {cfg_path} not found. Using default parameters.")
-                    model_arch_config = dict(dim=1024, depth=22, heads=16, ff_mult=2, text_dim=512, conv_layers=4)
-                    model_cls_name = "DiT"
+                # Generate Audio
+                print(f"  Generating {len(test_items)} sentences...")
                 
-                model_cls = get_class(f"f5_tts.model.{model_cls_name}")
-                
-                vocab_file = model_config.get('vocab_file', "")
-                tokenizer_type = model_config.get('tokenizer', "custom")
-                
-                model = load_model(
-                    model_cls=model_cls,
-                    model_cfg=model_arch_config,
-                    ckpt_path=ckpt_path,
-                    mel_spec_type=VOCODER_NAME,
-                    vocab_file=vocab_file,
-                    device=DEVICE,
-                    use_ema=True,
-                    tokenizer=tokenizer_type,
-                    use_n2gk_plus=True
-                )
-            except Exception as e:
-                print(f"  Error loading model {model_name}: {e}")
-                import traceback
-                traceback.print_exc()
-                continue
+                for i, item in enumerate(tqdm(test_items)):
+                    output_filename = os.path.basename(item["filename"])
+                    gen_text = item["text"]
+                    output_file = os.path.join(output_dir, output_filename)
+                    
+                    # Add to evaluation list (whether newly generated or skipped)
+                    
+                    if os.path.exists(output_file):
+                        files_to_eval.append((output_file, gen_text))
+                        continue
 
-            # Generate Audio
-            print(f"  Generating {len(test_items)} sentences...")
-            
-            for i, item in enumerate(tqdm(test_items)):
-                output_filename = os.path.basename(item["filename"])
-                gen_text = item["text"]
-                output_file = os.path.join(output_dir, output_filename)
+                    try:
+                        audio, sr, spectrogram = infer_process(
+                            ref_audio_processed,
+                            ref_text_processed,
+                            gen_text,
+                            model,
+                            vocoder,
+                            mel_spec_type=VOCODER_NAME,
+                            target_rms=TARGET_RMS,
+                            cross_fade_duration=CROSS_FADE_DURATION,
+                            nfe_step=NFE_STEP,
+                            cfg_strength=CFG_STRENGTH,
+                            sway_sampling_coef=SWAY_SAMPLING_COEF,
+                            speed=SPEED,
+                            device=DEVICE,
+                        )
+                        sf.write(output_file, audio, sr)
+                        files_to_eval.append((output_file, gen_text))
+                    except Exception as e:
+                        print(f"    Error generating {output_filename}: {e}")
                 
-                # Add to evaluation list (whether newly generated or skipped)
-                
-                if os.path.exists(output_file):
-                     files_to_eval.append((output_file, gen_text))
-                     continue
-
-                try:
-                    audio, sr, spectrogram = infer_process(
-                        ref_audio_processed,
-                        ref_text_processed,
-                        gen_text,
-                        model,
-                        vocoder,
-                        mel_spec_type=VOCODER_NAME,
-                        target_rms=TARGET_RMS,
-                        cross_fade_duration=CROSS_FADE_DURATION,
-                        nfe_step=NFE_STEP,
-                        cfg_strength=CFG_STRENGTH,
-                        sway_sampling_coef=SWAY_SAMPLING_COEF,
-                        speed=SPEED,
-                        device=DEVICE,
-                    )
-                    sf.write(output_file, audio, sr)
-                    files_to_eval.append((output_file, gen_text))
-                except Exception as e:
-                    print(f"    Error generating {output_filename}: {e}")
-            
-            # Filter files that actually exist (in case generation failed)
-            files_to_eval = [f for f in files_to_eval if os.path.exists(f[0])]
+                # Filter files that actually exist (in case generation failed)
+                files_to_eval = [f for f in files_to_eval if os.path.exists(f[0])]
 
             # ---------------------------------------------------------
             # B. Evaluation Loop (UTMOS + CER + WER)
