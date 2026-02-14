@@ -66,10 +66,9 @@ for mode in tokenizer_modes:
     for step in model_steps_k:
         MODELS.append({
             "type": "inference",
-            "vocab_path": "ckpts/pretrained/vocab_pretr.txt",
             "name": f"{mode}_{step}K",
             "ckpt_path": f"{ckpt_folder}/model_{step}000.pt",
-            "vocab_file": vocab_path,
+            "vocab_file": "ckpts/pretrained/vocab_pretr.txt",
             "model_cfg": f"src/f5_tts/configs/F5TTS_Base_ft_Lora_A100_{mode}.yaml",
             "tokenizer": f"kor_{mode}"
         })
