@@ -567,7 +567,7 @@ def infer_batch_process(
                     final_text_list = convert_char_to_grapheme(text_list)
 
             # 2. Allophone (Explicit or Implicit by Vocab)
-            elif tokenizer_type == "kor_allophone" or any("ⁱ" in k or "ᶜ" in k or "ʲ" in k for k in vocab):
+            elif tokenizer_type == "kor_allophone" or (tokenizer_type == "custom" and any("ⁱ" in k or "ᶜ" in k or "ʲ" in k for k in vocab)):
                 if use_n2gk:
                     text_list = [normalize_n2gk_plus(t) for t in text_list]
                 if use_skip_tc:
@@ -577,7 +577,18 @@ def infer_batch_process(
                     print("[Tokenizer] Korean Allophone" + (" + N2gk+" if use_n2gk else ""))
                     final_text_list = convert_char_to_allophone(text_list)
             
-            # 3. Grapheme (Implicit by Vocab)
+            # 3. Phoneme (Explicit or Implicit)
+            elif tokenizer_type == "kor_phoneme" or (tokenizer_type == "custom" and "ㄱ" in vocab):
+                if use_n2gk:
+                    text_list = [normalize_n2gk_plus(t) for t in text_list]
+                if use_skip_tc:
+                    print("[Tokenizer] Korean Phoneme (skipTC)" + (" legacy" if use_legacy else "") + (" + N2gk+" if use_n2gk else ""))
+                    final_text_list = convert_char_to_phoneme_skipTC(text_list, legacy=use_legacy)
+                else:
+                    print("[Tokenizer] Korean Phoneme (Standard G2P)" + (" + N2gk+" if use_n2gk else ""))
+                    final_text_list = convert_char_to_phoneme(text_list)
+            
+            # 4. Grapheme (Implicit by Vocab)
             elif "ㅄ" in vocab:
                 if use_n2gk:
                     text_list = [normalize_n2gk_plus(t) for t in text_list]
@@ -588,17 +599,7 @@ def infer_batch_process(
                     print("[Tokenizer] Korean Grapheme (Jamo)" + (" + N2gk+" if use_n2gk else ""))
                     final_text_list = convert_char_to_grapheme(text_list)
             
-            # 4. Phoneme (Explicit or Implicit)
-            elif tokenizer_type == "kor_phoneme" or "ㄱ" in vocab:
-                if use_n2gk:
-                    text_list = [normalize_n2gk_plus(t) for t in text_list]
-                if use_skip_tc:
-                    print("[Tokenizer] Korean Phoneme (skipTC)" + (" legacy" if use_legacy else "") + (" + N2gk+" if use_n2gk else ""))
-                    final_text_list = convert_char_to_phoneme_skipTC(text_list, legacy=use_legacy)
-                else:
-                    print("[Tokenizer] Korean Phoneme (Standard G2P)" + (" + N2gk+" if use_n2gk else ""))
-                    final_text_list = convert_char_to_phoneme(text_list)
-            # 4. Default Pinyin
+            # 5. Default Pinyin
             else:
                 print("[Tokenizer] Default: Pinyin/Char")
                 final_text_list = convert_char_to_pinyin(text_list)
