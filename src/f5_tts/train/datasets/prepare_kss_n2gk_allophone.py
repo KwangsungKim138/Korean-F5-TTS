@@ -30,7 +30,7 @@ from f5_tts.model.utils import (
 from f5_tts.train.datasets.normalization_n2gk import normalize_n2gk_plus
 
 
-def _iter_from_transcript(transcript_path: Path, dataset_dir: Path):
+def _iter_from_transcript(transcript_path: Path, dataset_dir: Path, test_file_ids: set[str] = None):
     """Yield (audio_path, text, duration) from KSS-style transcript."""
     with open(transcript_path, "r", encoding="utf-8") as f:
         lines = f.readlines()
@@ -39,6 +39,11 @@ def _iter_from_transcript(transcript_path: Path, dataset_dir: Path):
         if len(parts) < 3:
             continue
         rel_path, text = parts[0], parts[2]
+        
+        # Filter test set
+        if test_file_ids and rel_path in test_file_ids:
+            continue
+            
         wav_path = dataset_dir / rel_path
         if not wav_path.exists():
             continue
@@ -91,6 +96,22 @@ def main() -> None:
     data_root = args.data_root or (project_root / "data")
     save_dir = data_root / args.name
     save_dir.mkdir(parents=True, exist_ok=True)
+    
+    # Load test set to exclude
+    test_txt_path = data_root / "KSS" / "test.txt"
+    test_file_ids = set()
+    if test_txt_path.exists():
+        with open(test_txt_path, "r", encoding="utf-8") as f:
+            for line in f:
+                # Assuming test.txt contains relative paths or lines from transcript
+                # Usually test.txt contains the full line. Let's extract ID.
+                # If test.txt format is "path|..."
+                parts = line.strip().split("|")
+                if parts:
+                    test_file_ids.add(parts[0].strip())
+        print(f"Loaded {len(test_file_ids)} test files to exclude.")
+    else:
+        print(f"Warning: Test set file not found at {test_txt_path}. No filtering applied.")
 
     if args.parquet is not None:
         if not args.parquet.exists():
@@ -110,7 +131,7 @@ def main() -> None:
         if not transcript_path.exists():
             print(f"Error: Transcript not found: {transcript_path}")
             return
-        it = _iter_from_transcript(transcript_path, dataset_dir)
+        it = _iter_from_transcript(transcript_path, dataset_dir, test_file_ids=test_file_ids)
         print(f"Input: transcript {transcript_path}")
 
     print(f"Output: {save_dir}\nPipeline: N2gk+ -> g2pk -> allophone\n")

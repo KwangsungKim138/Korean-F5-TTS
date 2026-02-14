@@ -36,6 +36,9 @@ except ImportError:
 # Configuration
 # --------------------------
 
+model_steps_k = list(range(10, 105, 5)) # 10, 15, ..., 100
+tokenizer_modes = ["grapheme", "phoneme", "allophone"]
+
 # Define the models to evaluate
 # type: "inference" (default) | "existing" | "ground_truth"
 # - inference: ckpt_path, model_cfg, vocab_file, tokenizer 필요
@@ -47,46 +50,35 @@ MODELS = [
         "name": "Ground_Truth",
         "type": "ground_truth",
         "path": "data/KSS" # 원본 오디오 루트 (data/KSS/1/1_0001.wav 등을 찾음)
-    },
-    # 2. Inference Models
-    {
-        "type": "existing",
-        "path": "eval_results/F5TTS_Lora_A100_grapheme_55K",
-        "name": "F5TTS_Lora_A100_grapheme_55K",
-        "ckpt_path": "tests/model_55K_grp.pt",
-        "vocab_file": "ckpts/pretrained/vocab_pretr.txt",
-        "model_cfg": "src/f5_tts/configs/F5TTS_Base_ft_Lora_A100_grapheme.yaml",
-        "tokenizer": "kor_grapheme"
-    },
-    {
-        "type": "existing",
-        "path": "eval_results/F5TTS_Lora_A100_grapheme_60K",
-        "name": "F5TTS_Lora_A100_grapheme_60K",
-        "ckpt_path": "tests/model_60K_grp.pt",
-        "vocab_file": "ckpts/pretrained/vocab_pretr.txt",
-        "model_cfg": "src/f5_tts/configs/F5TTS_Base_ft_Lora_A100_grapheme.yaml",
-        "tokenizer": "kor_grapheme"
-    },
-    {
-        "type": "existing",
-        "path": "eval_results/F5TTS_Lora_A100_grapheme_57500",
-        "name": "F5TTS_Lora_A100_grapheme_57500",
-        "ckpt_path": "tests/model_57500.pt",
-        "vocab_file": "ckpts/pretrained/vocab_pretr.txt",
-        "model_cfg": "src/f5_tts/configs/F5TTS_Base_ft_Lora_A100_grapheme.yaml",
-        "tokenizer": "kor_grapheme"
-    },
-    # 3. Existing Folder Example (이미 생성된 오디오가 있다면 주석 해제)
-    # {
-    #     "name": "My_Previous_Result",
-    #     "type": "existing",
-    #     "path": "eval_results/F5TTS_Old_Model" 
-    # }
+    }
 ]
+
+# Generate model entries dynamically
+for mode in tokenizer_modes:
+    # Set paths based on mode
+    if mode == "allophone":
+        vocab_path = "data/KSS_n2gk_allophone/vocab.txt"
+        # Checkpoint folder pattern might vary, assuming consistent naming convention
+        ckpt_folder = "ckpts/F5TTS_Base_vocos_custom_KSS_n2gk_allophone_lora" 
+    elif mode == "phoneme":
+        vocab_path = "data/KSS/vocab.txt"
+        ckpt_folder = "ckpts/F5TTS_Base_vocos_custom_KSS_n2gk_phoneme_lora"
+    else: # grapheme
+        vocab_path = "data/KSS/vocab.txt"
+        ckpt_folder = "ckpts/F5TTS_Base_vocos_custom_KSS_n2gk_grapheme_lora"
+
+    for step in model_steps_k:
+        MODELS.append({
+            "type": "inference",
+            "name": f"{mode}_{step}K",
+            "ckpt_path": f"{ckpt_folder}/model_{step}000.pt",
+            "vocab_file": vocab_path,
+            "model_cfg": f"src/f5_tts/configs/F5TTS_Base_ft_Lora_A100_{mode}.yaml",
+            "tokenizer": f"kor_{mode}"
+        })
 
 # Settings
 TEST_SET_PATH = "data/KSS/test.txt"
-# If not exists, check fallback... (생략, 기존 로직 유지)
 if not os.path.exists(TEST_SET_PATH):
     print(f"Warning: {TEST_SET_PATH} not found.")
     throw
