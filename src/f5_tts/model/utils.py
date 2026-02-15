@@ -126,7 +126,7 @@ def get_tokenizer(dataset_name, tokenizer: str = "pinyin"):
                 - if use "kor_phoneme", derived from phonemes
                 - if use "byte", set to 256 (unicode byte range)
     """
-    if tokenizer in ["pinyin", "char", "kor_grapheme", "kor_allophone", "kor_phoneme", "kor_i_only", "kor_c_only", "kor_i_and_c", "kor_n_only", "kor_i_and_n"]:
+    if tokenizer in ["pinyin", "char", "kor_grapheme", "kor_allophone", "kor_phoneme", "kor_i_only", "kor_c_only", "kor_i_and_c", "kor_n_only", "kor_i_and_n", "kor_efficient_allophone"]:
         tokenizer_path = os.path.join(files("f5_tts").joinpath("../../data"), f"{dataset_name}_{tokenizer}/vocab.txt")
         with open(tokenizer_path, "r", encoding="utf-8") as f:
             vocab_char_map = {}
@@ -176,8 +176,10 @@ PHONEME_VOWELS = ['ㅏ','ㅐ','ㅑ','ㅒ','ㅓ','ㅔ','ㅕ','ㅖ','ㅗ','ㅘ', '
 
 # 3. Target phonemes - 변이음 세부 분류 규칙을 구성하는 음소들
 PHONEMES_I = ["ㄱ", "ㄷ", "ㅂ", "ㅈ", "ㅎ"] # 어두에서 무성음화되는 평음
-PHONEMES_P = ["ㄴ", "ㄹ", "ㅅ", "ㅆ"] # [j], [i] 앞에서 변이하는 자음
+PHONEMES_I_NO_H = ["ㄱ", "ㄷ", "ㅂ", "ㅈ"] # 사용자 정의: ㅎ 제외
+PHONEMES_P = ["ㅅ"] # [j], [i] 앞에서 변이하는 자음
 PHONEMES_C = ["ㄱ", "ㄴ", "ㄷ", "ㄹ", "ㅁ", "ㅂ", "ㅇ"] # 종성 phonemes
+PHONEMES_C_SONORANT = ["ㄴ", "ㄹ", "ㅁ", "ㅇ"] # 사용자 정의: 공명음 종성
 PHONEMES_N = ["ㄴ", "ㅁ", "ㅇ"]
 VOWELS_Y = ["ㅣ", "ㅑ", "ㅕ", "ㅛ", "ㅠ", "ㅖ", "ㅒ", "ㅟ"] # [j], [i] 계열 모음
 
@@ -224,6 +226,7 @@ def _classify_into_allophones(
     apply_pal: bool = True,
     apply_coda: bool = True,
     coda_filter: list[str] = None,
+    initial_filter: list[str] = None,
 ) -> list[str]:
     """
     음소열을 변이음 단위로 분류.
@@ -242,8 +245,14 @@ def _classify_into_allophones(
         cho, jung, jong = phonemes[:3]
 
     # 1) 초성(onset)
-    if apply_init and is_eojeol_initial and cho in PHONEMES_I:
-        allophones.append(cho + MARK_INIT)
+    if apply_init and is_eojeol_initial:
+        targets = initial_filter if initial_filter is not None else PHONEMES_I
+        if cho in targets:
+            allophones.append(cho + MARK_INIT)
+        elif apply_pal and cho in PHONEMES_P and jung in VOWELS_Y:
+            allophones.append(cho + MARK_PAL)
+        else:
+            allophones.append(cho)
     elif apply_pal and cho in PHONEMES_P and jung in VOWELS_Y:
         allophones.append(cho + MARK_PAL)
     else:
@@ -255,8 +264,9 @@ def _classify_into_allophones(
     # 3) 종성(coda). add_empty_jong이면 빈 종성에 skip_tc_token 부가
     if jong:
         if apply_coda:
-            # coda_filter가 있으면 해당되는 경우만 태그 부착
-            if coda_filter is None or jong in coda_filter:
+            # coda_filter가 명시되면 그 리스트를, 아니면 기본 PHONEMES_C를 사용
+            targets = coda_filter if coda_filter is not None else PHONEMES_C
+            if jong in targets:
                 allophones.append(jong + MARK_CODA)
             else:
                 allophones.append(jong)
@@ -273,6 +283,7 @@ def convert_char_to_allophone(
     apply_pal: bool = True,
     apply_coda: bool = True,
     coda_filter: list[str] = None,
+    initial_filter: list[str] = None,
 ) -> list[list[str]]:
     """Korean allophone list (no syllable-boundary token for empty coda)."""
     return _convert_char_to_allophone_impl(
@@ -282,6 +293,7 @@ def convert_char_to_allophone(
         apply_pal=apply_pal,
         apply_coda=apply_coda,
         coda_filter=coda_filter,
+        initial_filter=initial_filter,
     )
 
 
@@ -302,6 +314,7 @@ def _convert_char_to_allophone_impl(
     apply_pal: bool = True,
     apply_coda: bool = True,
     coda_filter: list[str] = None,
+    initial_filter: list[str] = None,
 ) -> list[list[str]]:
     final_text_list = []
     for text in text_list:
@@ -320,6 +333,7 @@ def _convert_char_to_allophone_impl(
                     apply_pal=apply_pal,
                     apply_coda=apply_coda,
                     coda_filter=coda_filter,
+                    initial_filter=initial_filter,
                 )
                 result.extend(allophones)
             result.append(" ")

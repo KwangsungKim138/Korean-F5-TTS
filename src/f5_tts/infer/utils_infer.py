@@ -577,8 +577,8 @@ def infer_batch_process(
                     print("[Tokenizer] Korean Allophone" + (" + N2gk+" if use_n2gk else ""))
                     final_text_list = convert_char_to_allophone(text_list)
             
-            # 2-b. Custom Allophone Modes (i-only, c-only, ic, n-only, in)
-            elif tokenizer_type in ["kor_i_only", "kor_c_only", "kor_i_and_c", "kor_n_only", "kor_in"]:
+            # 2-b. Custom Allophone Modes (i-only, c-only, i-and-c, n-only, i-and-n, efficient-allophone)
+            elif tokenizer_type in ["kor_i_only", "kor_c_only", "kor_i_and_c", "kor_n_only", "kor_i_and_n", "kor_efficient_allophone"]:
                 if use_n2gk:
                     text_list = [normalize_n2gk_plus(t) for t in text_list]
                 
@@ -586,6 +586,7 @@ def infer_batch_process(
                 apply_pal = False  # Always False for these modes
                 apply_coda = False
                 coda_filter = None
+                initial_filter = None
                 
                 if tokenizer_type == "kor_i_only":
                     apply_init = True
@@ -603,6 +604,12 @@ def infer_batch_process(
                     apply_coda = True
                     from f5_tts.model.utils import PHONEMES_N
                     coda_filter = PHONEMES_N
+                elif tokenizer_type == "kor_efficient_allophone":
+                    apply_init = True
+                    apply_coda = True
+                    from f5_tts.model.utils import PHONEMES_I_NO_H, PHONEMES_C_SONORANT
+                    initial_filter = PHONEMES_I_NO_H
+                    coda_filter = PHONEMES_C_SONORANT
 
                 print(f"[Tokenizer] Korean Custom Allophone ({tokenizer_type})" + (" + N2gk+" if use_n2gk else ""))
                 final_text_list = convert_char_to_allophone(
@@ -610,7 +617,8 @@ def infer_batch_process(
                     apply_init=apply_init, 
                     apply_pal=apply_pal, 
                     apply_coda=apply_coda,
-                    coda_filter=coda_filter
+                    coda_filter=coda_filter,
+                    initial_filter=initial_filter
                 )
 
             # 3. Phoneme (Explicit or Implicit)
