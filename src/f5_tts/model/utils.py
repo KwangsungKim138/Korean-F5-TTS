@@ -126,7 +126,7 @@ def get_tokenizer(dataset_name, tokenizer: str = "pinyin"):
                 - if use "kor_phoneme", derived from phonemes
                 - if use "byte", set to 256 (unicode byte range)
     """
-    if tokenizer in ["pinyin", "char", "kor_grapheme", "kor_allophone", "kor_phoneme", "kor_i_only", "kor_c_only", "kor_i_and_c"]:
+    if tokenizer in ["pinyin", "char", "kor_grapheme", "kor_allophone", "kor_phoneme", "kor_i_only", "kor_c_only", "kor_i_and_c", "kor_n_only", "kor_i_and_n"]:
         tokenizer_path = os.path.join(files("f5_tts").joinpath("../../data"), f"{dataset_name}_{tokenizer}/vocab.txt")
         with open(tokenizer_path, "r", encoding="utf-8") as f:
             vocab_char_map = {}
@@ -178,6 +178,7 @@ PHONEME_VOWELS = ['ㅏ','ㅐ','ㅑ','ㅒ','ㅓ','ㅔ','ㅕ','ㅖ','ㅗ','ㅘ', '
 PHONEMES_I = ["ㄱ", "ㄷ", "ㅂ", "ㅈ", "ㅎ"] # 어두에서 무성음화되는 평음
 PHONEMES_P = ["ㄴ", "ㄹ", "ㅅ", "ㅆ"] # [j], [i] 앞에서 변이하는 자음
 PHONEMES_C = ["ㄱ", "ㄴ", "ㄷ", "ㄹ", "ㅁ", "ㅂ", "ㅇ"] # 종성 phonemes
+PHONEMES_N = ["ㄴ", "ㅁ", "ㅇ"]
 VOWELS_Y = ["ㅣ", "ㅑ", "ㅕ", "ㅛ", "ㅠ", "ㅖ", "ㅒ", "ㅟ"] # [j], [i] 계열 모음
 
 # 4. allophone 기호
@@ -222,6 +223,7 @@ def _classify_into_allophones(
     apply_init: bool = True,
     apply_pal: bool = True,
     apply_coda: bool = True,
+    coda_filter: list[str] = None,
 ) -> list[str]:
     """
     음소열을 변이음 단위로 분류.
@@ -230,6 +232,7 @@ def _classify_into_allophones(
     apply_init: 초성 변이음(MARK_INIT) 적용 여부.
     apply_pal: 구개음화(MARK_PAL) 적용 여부.
     apply_coda: 종성 변이음(MARK_CODA) 적용 여부.
+    coda_filter: 종성 변이음 적용 대상 음소 리스트. None이면 모두 적용.
     """
     allophones = []
 
@@ -252,7 +255,11 @@ def _classify_into_allophones(
     # 3) 종성(coda). add_empty_jong이면 빈 종성에 skip_tc_token 부가
     if jong:
         if apply_coda:
-            allophones.append(jong + MARK_CODA)
+            # coda_filter가 있으면 해당되는 경우만 태그 부착
+            if coda_filter is None or jong in coda_filter:
+                allophones.append(jong + MARK_CODA)
+            else:
+                allophones.append(jong)
         else:
             allophones.append(jong)
     elif add_empty_jong:
@@ -265,6 +272,7 @@ def convert_char_to_allophone(
     apply_init: bool = True,
     apply_pal: bool = True,
     apply_coda: bool = True,
+    coda_filter: list[str] = None,
 ) -> list[list[str]]:
     """Korean allophone list (no syllable-boundary token for empty coda)."""
     return _convert_char_to_allophone_impl(
@@ -273,6 +281,7 @@ def convert_char_to_allophone(
         apply_init=apply_init,
         apply_pal=apply_pal,
         apply_coda=apply_coda,
+        coda_filter=coda_filter,
     )
 
 
@@ -292,6 +301,7 @@ def _convert_char_to_allophone_impl(
     apply_init: bool = True,
     apply_pal: bool = True,
     apply_coda: bool = True,
+    coda_filter: list[str] = None,
 ) -> list[list[str]]:
     final_text_list = []
     for text in text_list:
@@ -309,6 +319,7 @@ def _convert_char_to_allophone_impl(
                     apply_init=apply_init,
                     apply_pal=apply_pal,
                     apply_coda=apply_coda,
+                    coda_filter=coda_filter,
                 )
                 result.extend(allophones)
             result.append(" ")
