@@ -577,6 +577,31 @@ def infer_batch_process(
                     print("[Tokenizer] Korean Allophone" + (" + N2gk+" if use_n2gk else ""))
                     final_text_list = convert_char_to_allophone(text_list)
             
+            # 2-b. Custom Allophone Modes (i-only, c-only, ic)
+            elif tokenizer_type in ["kor_i_only", "kor_c_only", "kor_ic"]:
+                if use_n2gk:
+                    text_list = [normalize_n2gk_plus(t) for t in text_list]
+                
+                apply_init = False
+                apply_pal = False  # Always False for these modes
+                apply_coda = False
+                
+                if tokenizer_type == "kor_i_only":
+                    apply_init = True
+                elif tokenizer_type == "kor_c_only":
+                    apply_coda = True
+                elif tokenizer_type == "kor_ic":
+                    apply_init = True
+                    apply_coda = True
+
+                print(f"[Tokenizer] Korean Custom Allophone ({tokenizer_type})" + (" + N2gk+" if use_n2gk else ""))
+                final_text_list = convert_char_to_allophone(
+                    text_list, 
+                    apply_init=apply_init, 
+                    apply_pal=apply_pal, 
+                    apply_coda=apply_coda
+                )
+
             # 3. Phoneme (Explicit or Implicit)
             elif tokenizer_type == "kor_phoneme" or (tokenizer_type == "custom" and "ㄱ" in vocab):
                 if use_n2gk:

@@ -116,6 +116,7 @@ def get_tokenizer(dataset_name, tokenizer: str = "pinyin"):
                 - "kor_grapheme" for Korean Jamo decomposition (no G2P), need .txt vocab_file
                 - "kor_allophone" for Korean G2A conversion, need .txt vocab_file
                 - "kor_phoneme" for standard phoneme tokenizer, need .txt vocab_file
+                - "kor_i_only", "kor_c_only", "kor_ic" for custom Korean G2A modes, need .txt vocab_file
                 - "byte" for utf-8 tokenizer
                 - "custom" if you're directly passing in a path to the vocab.txt you want to use
     vocab_size  - if use "pinyin", all available pinyin types, common alphabets (also those with accent) and symbols
@@ -125,7 +126,7 @@ def get_tokenizer(dataset_name, tokenizer: str = "pinyin"):
                 - if use "kor_phoneme", derived from phonemes
                 - if use "byte", set to 256 (unicode byte range)
     """
-    if tokenizer in ["pinyin", "char", "kor_grapheme", "kor_allophone", "kor_phoneme"]:
+    if tokenizer in ["pinyin", "char", "kor_grapheme", "kor_allophone", "kor_phoneme", "kor_i_only", "kor_c_only", "kor_ic"]:
         tokenizer_path = os.path.join(files("f5_tts").joinpath("../../data"), f"{dataset_name}_{tokenizer}/vocab.txt")
         with open(tokenizer_path, "r", encoding="utf-8") as f:
             vocab_char_map = {}
@@ -218,11 +219,17 @@ def _classify_into_allophones(
     is_eojeol_initial: bool,
     add_empty_jong: bool = False,
     skip_tc_token: str = SKIPTC_TOKEN,
+    apply_init: bool = True,
+    apply_pal: bool = True,
+    apply_coda: bool = True,
 ) -> list[str]:
     """
     음소열을 변이음 단위로 분류.
     add_empty_jong: True면 종성 없을 때 skip_tc_token 부가 (allophone-skipTC).
     skip_tc_token: SKIPTC_TOKEN('*') 또는 ''(레거시).
+    apply_init: 초성 변이음(MARK_INIT) 적용 여부.
+    apply_pal: 구개음화(MARK_PAL) 적용 여부.
+    apply_coda: 종성 변이음(MARK_CODA) 적용 여부.
     """
     allophones = []
 
@@ -232,9 +239,9 @@ def _classify_into_allophones(
         cho, jung, jong = phonemes[:3]
 
     # 1) 초성(onset)
-    if is_eojeol_initial and cho in PHONEMES_I:
+    if apply_init and is_eojeol_initial and cho in PHONEMES_I:
         allophones.append(cho + MARK_INIT)
-    elif cho in PHONEMES_P and jung in VOWELS_Y:
+    elif apply_pal and cho in PHONEMES_P and jung in VOWELS_Y:
         allophones.append(cho + MARK_PAL)
     else:
         allophones.append(cho)
@@ -244,15 +251,29 @@ def _classify_into_allophones(
 
     # 3) 종성(coda). add_empty_jong이면 빈 종성에 skip_tc_token 부가
     if jong:
-        allophones.append(jong + MARK_CODA)
+        if apply_coda:
+            allophones.append(jong + MARK_CODA)
+        else:
+            allophones.append(jong)
     elif add_empty_jong:
         allophones.append(skip_tc_token)
 
     return allophones
 
-def convert_char_to_allophone(text_list: list[str]) -> list[list[str]]:
+def convert_char_to_allophone(
+    text_list: list[str],
+    apply_init: bool = True,
+    apply_pal: bool = True,
+    apply_coda: bool = True,
+) -> list[list[str]]:
     """Korean allophone list (no syllable-boundary token for empty coda)."""
-    return _convert_char_to_allophone_impl(text_list, add_empty_jong=False)
+    return _convert_char_to_allophone_impl(
+        text_list, 
+        add_empty_jong=False,
+        apply_init=apply_init,
+        apply_pal=apply_pal,
+        apply_coda=apply_coda,
+    )
 
 
 def convert_char_to_allophone_skipTC(
@@ -268,6 +289,9 @@ def _convert_char_to_allophone_impl(
     text_list: list[str],
     add_empty_jong: bool,
     skip_tc_token: str = SKIPTC_TOKEN,
+    apply_init: bool = True,
+    apply_pal: bool = True,
+    apply_coda: bool = True,
 ) -> list[list[str]]:
     final_text_list = []
     for text in text_list:
@@ -282,6 +306,9 @@ def _convert_char_to_allophone_impl(
                     is_eojeol_initial=(i == 0),
                     add_empty_jong=add_empty_jong,
                     skip_tc_token=skip_tc_token,
+                    apply_init=apply_init,
+                    apply_pal=apply_pal,
+                    apply_coda=apply_coda,
                 )
                 result.extend(allophones)
             result.append(" ")
