@@ -45,6 +45,7 @@ def calculate_gini(frequencies):
 def main():
     parser = argparse.ArgumentParser(description="Analyze symbol statistics of a prepared dataset.")
     parser.add_argument("dataset_dir", type=Path, help="Path to the dataset directory containing raw.arrow (e.g., data/KSS_n2gk_i_only)")
+    parser.add_argument("--include-space", action="store_true", help="Include space character ' ' in statistics (default: False)")
     args = parser.parse_args()
 
     dataset_path = args.dataset_dir
@@ -81,6 +82,14 @@ def main():
             counter.update(list(text))
         else:
             pass
+
+    # Handle space exclusion
+    if not args.include_space:
+        if " " in counter:
+            del counter[" "]
+        # Also remove empty strings if any
+        if "" in counter:
+            del counter[""]
 
     # Sort by count descending
     sorted_stats = counter.most_common()
