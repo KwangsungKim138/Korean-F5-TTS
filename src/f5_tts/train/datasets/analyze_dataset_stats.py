@@ -5,6 +5,7 @@ Output: stats.txt in the dataset directory.
 """
 import argparse
 import os
+import re
 import sys
 from collections import Counter
 from pathlib import Path
@@ -13,6 +14,12 @@ import numpy as np
 from datasets import Dataset
 
 sys.path.insert(0, os.getcwd())
+
+
+# Regex to match Korean char (Hangul Syllables or Jamo) optionally followed by a tag (init/coda/pal)
+# Range: 가-힣 (AC00-D7A3), ㄱ-ㅎㅏ-ㅣ (3131-3163 approx)
+# Tags: ⁱ, ᶜ, ʲ
+VALID_TOKEN_PATTERN = re.compile(r'^[가-힣ㄱ-ㅎㅏ-ㅣ][ⁱᶜʲ]?$')
 
 
 def calculate_gini(frequencies):
@@ -74,22 +81,18 @@ def main():
 
     for row in ds:
         text = row["text"]
+        tokens = []
         if isinstance(text, list):
             # If tokenized list (e.g. allophone tokens)
-            counter.update(text)
+            tokens = text
         elif isinstance(text, str):
             # If raw string (e.g. grapheme string)
-            counter.update(list(text))
-        else:
-            pass
+            tokens = list(text)
 
-    # Handle space exclusion
-    if not args.include_space:
-        if " " in counter:
-            del counter[" "]
-        # Also remove empty strings if any
-        if "" in counter:
-            del counter[""]
+        # Filter tokens: only valid Korean chars (+tags)
+        # Note: space is automatically excluded by the regex pattern
+        valid_tokens = [t for t in tokens if VALID_TOKEN_PATTERN.match(t)]
+        counter.update(valid_tokens)
 
     # Sort by count descending
     sorted_stats = counter.most_common()
