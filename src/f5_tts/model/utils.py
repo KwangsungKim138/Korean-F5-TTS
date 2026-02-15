@@ -116,7 +116,7 @@ def get_tokenizer(dataset_name, tokenizer: str = "pinyin"):
                 - "kor_grapheme" for Korean Jamo decomposition (no G2P), need .txt vocab_file
                 - "kor_allophone" for Korean G2A conversion, need .txt vocab_file
                 - "kor_phoneme" for standard phoneme tokenizer, need .txt vocab_file
-                - "kor_i_only", "kor_c_only", "kor_ic" for custom Korean G2A modes, need .txt vocab_file
+                - "kor_i_only", "kor_c_only", "kor_i_and_c" for custom Korean G2A modes, need .txt vocab_file
                 - "byte" for utf-8 tokenizer
                 - "custom" if you're directly passing in a path to the vocab.txt you want to use
     vocab_size  - if use "pinyin", all available pinyin types, common alphabets (also those with accent) and symbols
@@ -126,7 +126,7 @@ def get_tokenizer(dataset_name, tokenizer: str = "pinyin"):
                 - if use "kor_phoneme", derived from phonemes
                 - if use "byte", set to 256 (unicode byte range)
     """
-    if tokenizer in ["pinyin", "char", "kor_grapheme", "kor_allophone", "kor_phoneme", "kor_i_only", "kor_c_only", "kor_ic"]:
+    if tokenizer in ["pinyin", "char", "kor_grapheme", "kor_allophone", "kor_phoneme", "kor_i_only", "kor_c_only", "kor_i_and_c"]:
         tokenizer_path = os.path.join(files("f5_tts").joinpath("../../data"), f"{dataset_name}_{tokenizer}/vocab.txt")
         with open(tokenizer_path, "r", encoding="utf-8") as f:
             vocab_char_map = {}

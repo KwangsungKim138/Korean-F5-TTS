@@ -75,7 +75,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(
         description="N2gk+ -> g2pk -> allophone (i and c)."
     )
-    parser.add_argument("--name", type=str, default="KSS_n2gk_ic", help="Output dataset name.")
+    parser.add_argument("--name", type=str, default="KSS_n2gk_i_and_c", help="Output dataset name.")
     parser.add_argument("--data-root", type=Path, default=None, help="Data root (default: project_root/data).")
     # Transcript input (KSS-style)
     parser.add_argument("--transcript", type=Path, default=None, help="KSS transcript path (pipe-separated).")

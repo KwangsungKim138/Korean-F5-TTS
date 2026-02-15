@@ -578,7 +578,7 @@ def infer_batch_process(
                     final_text_list = convert_char_to_allophone(text_list)
             
             # 2-b. Custom Allophone Modes (i-only, c-only, ic)
-            elif tokenizer_type in ["kor_i_only", "kor_c_only", "kor_ic"]:
+            elif tokenizer_type in ["kor_i_only", "kor_c_only", "kor_i_and_c"]:
                 if use_n2gk:
                     text_list = [normalize_n2gk_plus(t) for t in text_list]
                 
@@ -590,7 +590,7 @@ def infer_batch_process(
                     apply_init = True
                 elif tokenizer_type == "kor_c_only":
                     apply_coda = True
-                elif tokenizer_type == "kor_ic":
+                elif tokenizer_type == "kor_i_and_c":
                     apply_init = True
                     apply_coda = True
 
