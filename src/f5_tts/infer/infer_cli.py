@@ -197,6 +197,12 @@ parser.add_argument(
     dest="use_n2gk_plus",
     help="Disable N2gk+ normalization.",
 )
+parser.add_argument(
+    "--tokenizer",
+    type=str,
+    default="custom",
+    help="Tokenizer type (e.g. custom, kor_inf, kor_n_only, etc). Default: custom.",
+)
 args = parser.parse_args()
 
 
@@ -332,6 +338,7 @@ ema_model = load_model(
     tokenizer_version=tokenizer_version,
     use_skip_tc=use_skip_tc,
     use_n2gk_plus=use_n2gk_plus,
+    tokenizer=args.tokenizer,
 )
 
 

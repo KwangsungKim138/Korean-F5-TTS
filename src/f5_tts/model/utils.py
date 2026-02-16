@@ -126,7 +126,7 @@ def get_tokenizer(dataset_name, tokenizer: str = "pinyin"):
                 - if use "kor_phoneme", derived from phonemes
                 - if use "byte", set to 256 (unicode byte range)
     """
-    if tokenizer in ["pinyin", "char", "kor_grapheme", "kor_allophone", "kor_phoneme", "kor_i_only", "kor_c_only", "kor_i_and_c", "kor_n_only", "kor_i_and_n", "kor_efficient_allophone"]:
+    if tokenizer in ["pinyin", "char", "kor_grapheme", "kor_allophone", "kor_phoneme", "kor_i_only", "kor_c_only", "kor_i_and_c", "kor_n_only", "kor_i_and_n", "kor_efficient_allophone", "kor_inf"]:
         tokenizer_path = os.path.join(files("f5_tts").joinpath("../../data"), f"{dataset_name}_{tokenizer}/vocab.txt")
         with open(tokenizer_path, "r", encoding="utf-8") as f:
             vocab_char_map = {}
