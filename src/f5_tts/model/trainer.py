@@ -54,6 +54,7 @@ class Trainer:
         local_vocoder_path: str = "",  # local vocoder path
         model_cfg_dict: dict = dict(),  # training config
         resume_from_checkpoint: bool = True,  # if False, start from update 0 (e.g. LoRA from pretrained)
+        resume_checkpoint_filename: str | None = None,
     ):
         ddp_kwargs = DistributedDataParallelKwargs(find_unused_parameters=False)
 
@@ -120,6 +121,7 @@ class Trainer:
         self.last_per_updates = default(last_per_updates, save_per_updates)
         self.checkpoint_path = default(checkpoint_path, "ckpts/test_f5-tts")
         self.resume_from_checkpoint = resume_from_checkpoint
+        self.resume_checkpoint_filename = resume_checkpoint_filename
 
         self.batch_size_per_gpu = batch_size_per_gpu
         self.batch_size_type = batch_size_type
@@ -192,7 +194,11 @@ class Trainer:
             return 0
 
         self.accelerator.wait_for_everyone()
-        if "model_last.pt" in os.listdir(self.checkpoint_path):
+        if self.resume_checkpoint_filename is not None and os.path.exists(
+            os.path.join(self.checkpoint_path, self.resume_checkpoint_filename)
+        ):
+            latest_checkpoint = self.resume_checkpoint_filename
+        elif "model_last.pt" in os.listdir(self.checkpoint_path):
             latest_checkpoint = "model_last.pt"
         else:
             # Updated to consider pretrained models for loading but prioritize training checkpoints

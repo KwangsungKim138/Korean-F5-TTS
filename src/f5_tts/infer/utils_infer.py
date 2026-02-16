@@ -577,8 +577,8 @@ def infer_batch_process(
                     print("[Tokenizer] Korean Allophone" + (" + N2gk+" if use_n2gk else ""))
                     final_text_list = convert_char_to_allophone(text_list)
             
-            # 2-b. Custom Allophone Modes (i-only, c-only, i-and-c, n-only, i-and-n, efficient-allophone, inf)
-            elif tokenizer_type in ["kor_i_only", "kor_c_only", "kor_i_and_c", "kor_n_only", "kor_i_and_n", "kor_efficient_allophone", "kor_inf"]:
+            # 2-b. Custom Allophone Modes (i-only, c-only, i-and-c, n-only, i-and-n, efficient-allophone, inf, nf)
+            elif tokenizer_type in ["kor_i_only", "kor_c_only", "kor_i_and_c", "kor_n_only", "kor_i_and_n", "kor_efficient_allophone", "kor_inf", "kor_nf"]:
                 if use_n2gk:
                     text_list = [normalize_n2gk_plus(t) for t in text_list]
                 
@@ -615,6 +615,11 @@ def infer_batch_process(
                     apply_coda = True
                     from f5_tts.model.utils import PHONEMES_C_SONORANT
                     # Default initial_filter is PHONEMES_I which is correct for I
+                    coda_filter = PHONEMES_C_SONORANT
+                elif tokenizer_type == "kor_nf":
+                    apply_init = False
+                    apply_coda = True
+                    from f5_tts.model.utils import PHONEMES_C_SONORANT
                     coda_filter = PHONEMES_C_SONORANT
 
                 print(f"[Tokenizer] Korean Custom Allophone ({tokenizer_type})" + (" + N2gk+" if use_n2gk else ""))
