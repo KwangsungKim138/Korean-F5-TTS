@@ -442,7 +442,7 @@ def preprocess_ref_audio_text(ref_audio_orig, ref_text, show_info=print):
         else:
             ref_text += ". "
 
-    print("\nref_text  ", ref_text)
+    # print("\nref_text  ", ref_text)
 
     return ref_audio, ref_text
 
@@ -472,9 +472,9 @@ def infer_process(
     audio, sr = torchaudio.load(ref_audio)
     max_chars = int(len(ref_text.encode("utf-8")) / (audio.shape[-1] / sr) * (22 - audio.shape[-1] / sr) * speed)
     gen_text_batches = chunk_text(gen_text, max_chars=max_chars)
-    for i, gen_text in enumerate(gen_text_batches):
-        print(f"gen_text {i}", gen_text)
-    print("\n")
+    # for i, gen_text in enumerate(gen_text_batches):
+    #     print(f"gen_text {i}", gen_text)
+    # print("\n")
 
     show_info(f"Generating audio in {len(gen_text_batches)} batches...")
     return next(
@@ -560,10 +560,10 @@ def infer_batch_process(
                 if use_n2gk:
                     text_list = [normalize_n2gk_plus(t) for t in text_list]
                 if use_skip_tc:
-                    print("[Tokenizer] Korean Grapheme (skipTC)" + (" legacy" if use_legacy else "") + (" + N2gk+" if use_n2gk else ""))
+                    # print("[Tokenizer] Korean Grapheme (skipTC)" + (" legacy" if use_legacy else "") + (" + N2gk+" if use_n2gk else ""))
                     final_text_list = convert_char_to_grapheme_skipTC(text_list, legacy=use_legacy)
                 else:
-                    print("[Tokenizer] Korean Grapheme (Jamo)" + (" + N2gk+" if use_n2gk else ""))
+                    # print("[Tokenizer] Korean Grapheme (Jamo)" + (" + N2gk+" if use_n2gk else ""))
                     final_text_list = convert_char_to_grapheme(text_list)
 
             # 2. Allophone (Explicit or Implicit by Vocab)
@@ -571,10 +571,10 @@ def infer_batch_process(
                 if use_n2gk:
                     text_list = [normalize_n2gk_plus(t) for t in text_list]
                 if use_skip_tc:
-                    print("[Tokenizer] Korean Allophone (skipTC)" + (" legacy" if use_legacy else "") + (" + N2gk+" if use_n2gk else ""))
+                    # print("[Tokenizer] Korean Allophone (skipTC)" + (" legacy" if use_legacy else "") + (" + N2gk+" if use_n2gk else ""))
                     final_text_list = convert_char_to_allophone_skipTC(text_list, legacy=use_legacy)
                 else:
-                    print("[Tokenizer] Korean Allophone" + (" + N2gk+" if use_n2gk else ""))
+                    # print("[Tokenizer] Korean Allophone" + (" + N2gk+" if use_n2gk else ""))
                     final_text_list = convert_char_to_allophone(text_list)
             
             # 2-b. Custom Allophone Modes (i-only, c-only, i-and-c, n-only, i-and-n, efficient-allophone, inf, nf)
@@ -622,7 +622,7 @@ def infer_batch_process(
                     from f5_tts.model.utils import PHONEMES_C_SONORANT
                     coda_filter = PHONEMES_C_SONORANT
 
-                print(f"[Tokenizer] Korean Custom Allophone ({tokenizer_type})" + (" + N2gk+" if use_n2gk else ""))
+                # print(f"[Tokenizer] Korean Custom Allophone ({tokenizer_type})" + (" + N2gk+" if use_n2gk else ""))
                 final_text_list = convert_char_to_allophone(
                     text_list, 
                     apply_init=apply_init, 
@@ -637,10 +637,10 @@ def infer_batch_process(
                 if use_n2gk:
                     text_list = [normalize_n2gk_plus(t) for t in text_list]
                 if use_skip_tc:
-                    print("[Tokenizer] Korean Phoneme (skipTC)" + (" legacy" if use_legacy else "") + (" + N2gk+" if use_n2gk else ""))
+                    # print("[Tokenizer] Korean Phoneme (skipTC)" + (" legacy" if use_legacy else "") + (" + N2gk+" if use_n2gk else ""))
                     final_text_list = convert_char_to_phoneme_skipTC(text_list, legacy=use_legacy)
                 else:
-                    print("[Tokenizer] Korean Phoneme (Standard G2P)" + (" + N2gk+" if use_n2gk else ""))
+                    # print("[Tokenizer] Korean Phoneme (Standard G2P)" + (" + N2gk+" if use_n2gk else ""))
                     final_text_list = convert_char_to_phoneme(text_list)
             
             # 4. Grapheme (Implicit by Vocab)
@@ -648,10 +648,10 @@ def infer_batch_process(
                 if use_n2gk:
                     text_list = [normalize_n2gk_plus(t) for t in text_list]
                 if use_skip_tc:
-                    print("[Tokenizer] Korean Grapheme (skipTC)" + (" legacy" if use_legacy else "") + (" + N2gk+" if use_n2gk else ""))
+                    # print("[Tokenizer] Korean Grapheme (skipTC)" + (" legacy" if use_legacy else "") + (" + N2gk+" if use_n2gk else ""))
                     final_text_list = convert_char_to_grapheme_skipTC(text_list, legacy=use_legacy)
                 else:
-                    print("[Tokenizer] Korean Grapheme (Jamo)" + (" + N2gk+" if use_n2gk else ""))
+                    # print("[Tokenizer] Korean Grapheme (Jamo)" + (" + N2gk+" if use_n2gk else ""))
                     final_text_list = convert_char_to_grapheme(text_list)
             
             # 5. Default Pinyin

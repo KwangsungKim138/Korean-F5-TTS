@@ -1,26 +1,41 @@
 import os
 import sys
 import warnings
-
-# Filter cudnn warnings
-warnings.filterwarnings("ignore", message="Plan failed with a cudnnException")
-
-import torch
-import torchaudio
-import soundfile as sf
-import argparse
-from tqdm import tqdm
-from pathlib import Path
-import numpy as np
-import pandas as pd
-import whisper
-import jiwer
 import re
+import argparse
+import random
+from pathlib import Path
+from tqdm import tqdm
+import pandas as pd
+import numpy as np
+import torch
+import torch.nn.functional as F
+import soundfile as sf
 from omegaconf import OmegaConf
 from hydra.utils import get_class
+import jiwer
+import whisper
+import torchaudio # Use torchaudio instead of transformers for WavLM
 
-# Add src to path to import f5_tts modules
+# Filter warnings
+warnings.filterwarnings("ignore", message="Plan failed with a cudnnException")
+warnings.filterwarnings("ignore", category=UserWarning)
+
+# Add src to path
 sys.path.append(os.path.join(os.path.dirname(__file__), "src"))
+
+# Add UTMOSv2 to path
+utmos_path = os.path.join(os.path.dirname(__file__), "src/third_party/UTMOSv2")
+sys.path.append(utmos_path)
+try:
+    import utmosv2
+    print("✅ UTMOSv2 imported successfully.")
+except ImportError as e:
+    print(f"⚠️ Failed to import UTMOSv2: {e}")
+    utmosv2 = None
+except Exception as e:
+    print(f"⚠️ Unexpected error importing UTMOSv2: {e}")
+    utmosv2 = None
 
 from f5_tts.infer.utils_infer import (
     load_model,
@@ -41,77 +56,38 @@ except ImportError:
 # Configuration
 # --------------------------
 
-grapheme_steps_k = {
-    "mode": "grapheme",
-    "inference": list(range(50, 60, 5)),
-    "existing": list(range(10, 50, 5)),
-    }
-
-phoneme_steps_k = {
-    "mode": "phoneme",
-    "inference": list(range(10, 60, 5)),
-    "existing": [],
-    }
-
-allophone_steps_k = {
-    "mode": "allophone",
-    "inference": list(range(10, 60, 5)),
-    "existing": [],
-    }
-
-eval_models = [grapheme_steps_k, phoneme_steps_k, allophone_steps_k]
-
-# Define the models to evaluate
-# type: "inference" (default) | "existing" | "ground_truth"
-# - inference: ckpt_path, model_cfg, vocab_file, tokenizer 필요
-# - existing: path (오디오 파일들이 있는 폴더 경로) 필요
-# - ground_truth: path (데이터셋 루트 경로, 예: data/KSS) 필요
-MODELS = [
-    # 1. Ground Truth
-    {
-        "name": "Ground_Truth",
-        "type": "ground_truth",
-        "path": "data/KSS" # 원본 오디오 루트 (data/KSS/1/1_0001.wav 등을 찾음)
-    }
+# Models to Evaluate
+TARGET_MODES = [
+    "allophone", "phoneme", 
+    "n_only", "i_and_n", "inf",
+    "grapheme", "nf",
+    "i_only", "c_only", "i_and_c", 
+    "inf-h",    
 ]
 
-# Generate model entries dynamically
-for model in eval_models:
-    # Set paths based on mode
-    mode = model["mode"]
-    inf = model["inference"]
-    existing = model["existing"]
-    
-    ckpt_folder = f"ckpts/F5TTS_Base_vocos_custom_KSS_n2gk_{mode}_lora"
+# Step Ranges
+EVAL_STEPS = range(60, 151, 10)  # 60, 70, 80, 90, 100, ..., 150
+UTMOS_STEPS = {60, 70, 80, 90, 100, 110, 120, 130, 140, 150}      # Steps to run UTMOS
+SIM_STEPS = {60, 70, 80, 90, 100, 110, 120, 130, 140, 150}        # Steps to run SIM
 
-    for step in inf:
-        MODELS.append({
-            "type": "inference",
-            "name": f"{mode}_{step}K",
-            "ckpt_path": f"{ckpt_folder}/model_{step}000.pt",
-            "vocab_file": "ckpts/pretrained/vocab_pretr.txt",
-            "model_cfg": f"src/f5_tts/configs/F5TTS_Base_ft_Lora_A100_{mode}.yaml",
-            "tokenizer": f"kor_{mode}"
-        })
-        
-    for step in existing:
-        MODELS.append({
-            "type": "existing",
-            "name": f"{mode}_{step}K",
-            "path": f"eval_results/{mode}_{step}K",
-        })
+# Mapping for legacy names
+MODE_MAP = {
+    "inf-h": "efficient_allophone"
+}
 
-# Settings
-TEST_SET_PATH = "data/KSS/test.txt"
-if not os.path.exists(TEST_SET_PATH):
-    print(f"Warning: {TEST_SET_PATH} not found.")
-    throw
+# Data Paths
+DATA_ROOT = "data/KSS"
+TEST_TXT_PATH = os.path.join(DATA_ROOT, "test.txt")
+TRAIN_TXT_PATH = os.path.join(DATA_ROOT, "train_full.txt")
+
+if not os.path.exists(TEST_TXT_PATH) and os.path.exists("test.txt"):
+    TEST_TXT_PATH = "test.txt"
+if not os.path.exists(TRAIN_TXT_PATH) and os.path.exists("train_full.txt"):
+    TRAIN_TXT_PATH = "train_full.txt"
 
 OUTPUT_BASE_DIR = "eval_results"
 
-# Common settings (matching batch_infer.py)
-REF_AUDIO = "data/KSS/1/1_0001.wav"
-REF_TEXT = "그녀의 사랑을 얻기 위해 애썼지만, 헛수고였다."
+# Inference Settings
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 VOCODER_NAME = "vocos"
 TARGET_RMS = 0.1
@@ -120,406 +96,491 @@ NFE_STEP = 32
 CFG_STRENGTH = 2.0
 SWAY_SAMPLING_COEF = -1.0
 SPEED = 1.0
-
-# Whisper Settings
 WHISPER_SIZE = "large-v3"
 
 # --------------------------
-# Helper Functions
+# Helper 1: Reference Matching
+# --------------------------
+
+MIN_DURATION = 2.7
+CHAR_DURATION_RATIO = 0.33
+
+def parse_kss_line(line):
+    parts = line.strip().split("|")
+    if len(parts) < 5: return None
+    try:
+        return {"path": parts[0], "text": parts[2], "duration": float(parts[4])}
+    except ValueError: return None
+
+def get_pure_char_count(text):
+    return len(re.findall(r'[가-힣A-Za-z0-9]', text))
+
+def get_target_punctuation(text):
+    text = text.strip()
+    if not text: return "."
+    return text[-1] if text[-1] in ['.', '?', '!'] else "."
+
+def is_valid_candidate(text):
+    if ',' in text: return False
+    if '.' in text[:-1]: return False
+    return True
+
+def build_reference_mapping(test_path, train_path):
+    print("Building optimal reference mapping...")
+    test_items = []
+    with open(test_path, 'r', encoding='utf-8') as f:
+        for line in f:
+            item = parse_kss_line(line)
+            if item: test_items.append(item)
+    
+    candidates = []
+    with open(train_path, 'r', encoding='utf-8') as f:
+        for line in f:
+            item = parse_kss_line(line)
+            if item and is_valid_candidate(item['text']): candidates.append(item)
+    
+    mapping = {}
+    for t_item in test_items:
+        t_dur = t_item['duration']
+        t_chars = get_pure_char_count(t_item['text'])
+        t_punct = get_target_punctuation(t_item['text'])
+        
+        target_dur = max(t_chars * CHAR_DURATION_RATIO, MIN_DURATION)
+        
+        strict_pool = [c for c in candidates if get_pure_char_count(c['text']) == t_chars and get_target_punctuation(c['text']) == t_punct]
+        char_pool = [c for c in candidates if get_pure_char_count(c['text']) == t_chars] if not strict_pool else []
+        pool = strict_pool if strict_pool else (char_pool if char_pool else candidates)
+        
+        best_cand = min(pool, key=lambda c: abs(c['duration'] - target_dur))
+        if best_cand: mapping[t_item['path']] = best_cand
+            
+    return test_items, mapping
+
+# --------------------------
+# Helper 2: Evaluation Models
 # --------------------------
 
 def post_process_for_metric(text):
-    """get_cer_wer.py의 전처리 로직과 동일"""
-    # 특수문자 제거 (한글, 공백, 로마 알파벳, 숫자만)
     text = re.sub(r'[^\w\s가-힣ㄱ-ㅎ]', '', text)
-    # 다중 공백을 단일 공백으로 치환
     text = re.sub(r'\s+', ' ', text)
-    # Whisper 단골 hallucination
     text = re.sub(r'((자막 제공 및\s)+광고를 포함하고 있습니다)|(이 영상은 한국국토정보공사의 자료입니다)', '', text).strip()
     return text
 
-def load_test_sentences(path):
-    items = []
-    with open(path, "r", encoding="utf-8") as f:
-        for line in f:
-            line = line.strip()
-            if not line: continue
-            parts = line.split("|")
-            
-            if len(parts) >= 3:
-                filename_raw = parts[0]
-                text = parts[2] # Normalized text
-            elif len(parts) == 2:
-                filename_raw = parts[0]
-                text = parts[1] # Raw text
-            else:
-                filename_raw = f"sample_{len(items):04d}.wav"
-                text = line
+def load_vocoder_model():
+    print(f"Loading Vocoder ({VOCODER_NAME})...")
+    return load_vocoder(vocoder_name=VOCODER_NAME, is_local=False, device=DEVICE)
 
-            if "/" in filename_raw:
-                filename = filename_raw.split("/")[-1]
-            else:
-                filename = filename_raw
+def load_whisper_model():
+    print(f"Loading Whisper ({WHISPER_SIZE})...")
+    return whisper.load_model(WHISPER_SIZE, device=DEVICE)
+
+def load_utmos_model():
+    print("Loading UTMOSv2 predictor...")
+    if utmosv2 is None: return None
+    try:
+        model = utmosv2.create_model(pretrained=True)
+        return model.eval().to(DEVICE)
+    except Exception as e:
+        print(f"Failed to load UTMOSv2: {e}")
+        return None
+
+def load_wavlm_sim_model():
+    print(f"Loading WavLM (torchaudio bundle)...")
+    try:
+        # Use torchaudio's pre-trained WavLM bundle
+        bundle = torchaudio.pipelines.WAVLM_BASE_PLUS
+        model = bundle.get_model()
+        return bundle, model.to(DEVICE).eval()
+    except Exception as e:
+        print(f"Failed to load WavLM (torchaudio): {e}")
+        return None, None
+
+def calculate_sim(bundle, model, ref_path, gen_path):
+    try:
+        # Load and Resample
+        ref_wav, sr1 = torchaudio.load(ref_path)
+        gen_wav, sr2 = torchaudio.load(gen_path)
+        
+        target_sr = bundle.sample_rate
+        if sr1 != target_sr:
+            ref_wav = torchaudio.functional.resample(ref_wav, sr1, target_sr)
+        if sr2 != target_sr:
+            gen_wav = torchaudio.functional.resample(gen_wav, sr2, target_sr)
             
-            if not filename.endswith(".wav"):
-                filename += ".wav"
-                
-            items.append({
-                "filename_raw": filename_raw,
-                "filename": filename,
-                "text": text
-            })
-    return items
+        ref_wav = ref_wav.to(DEVICE)
+        gen_wav = gen_wav.to(DEVICE)
+
+        with torch.no_grad():
+            # WavLM returns (logits, layers)
+            # We take the mean of the last layer as embedding (simplified)
+            # or mean of all outputs. WavLM outputs [batch, time, dim]
+            
+            ref_out = model(ref_wav)[0] # [1, T, 768]
+            gen_out = model(gen_wav)[0]
+            
+            # Global Average Pooling for Speaker Embedding
+            ref_emb = ref_out.mean(dim=1)
+            gen_emb = gen_out.mean(dim=1)
+            
+        return F.cosine_similarity(ref_emb, gen_emb, dim=-1).item()
+    except Exception as e:
+        print(f"SIM Error: {e}")
+        return np.nan
+
+# --------------------------
+# Main Logic
+# --------------------------
 
 def run_evaluation():
-    # 1. Load UTMOS
-    print("Loading UTMOS predictor...")
-    try:
-        utmos_predictor = torch.hub.load("tarepan/SpeechMOS:v1.2.0", "utmos22_strong", trust_repo=True)
-        utmos_predictor = utmos_predictor.to(DEVICE)
-    except Exception as e:
-        print(f"Error loading UTMOS: {e}")
+    if not os.path.exists(TEST_TXT_PATH) or not os.path.exists(TRAIN_TXT_PATH):
+        print(f"Error: Dataset files not found.")
         return
 
-    # 2. Load Whisper
-    print(f"Loading Whisper model ({WHISPER_SIZE})...")
-    try:
-        whisper_model = whisper.load_model(WHISPER_SIZE, device=DEVICE)
-    except Exception as e:
-        print(f"Error loading Whisper: {e}")
-        return
-
-    # Load Test Items
-    test_items = load_test_sentences(TEST_SET_PATH)
-    print(f"Found {len(test_items)} test sentences.")
-
-    # Shared Resources
-    vocoder = None
-    ref_audio_processed = None
-    ref_text_processed = None
+    test_items, ref_mapping = build_reference_mapping(TEST_TXT_PATH, TRAIN_TXT_PATH)
+    total_items = len(test_items)
     
-    final_summary_rows = []
+    vocoder = None
+    whisper_model = None
+    utmos_predictor = None
+    wavlm_bundle, wavlm_model = None, None
+    
+    print("Pre-processing reference audios...")
+    ref_cache = {}
+    
+    final_summary = []
 
-    for model_config in MODELS:
-        model_name = model_config['name']
-        model_type = model_config.get('type', 'inference')
-        print(f"\n[{model_name}] Processing (Type: {model_type})...")
+    # --------------------------
+    # Evaluate Ground Truth
+    # --------------------------
+    gt_dir = os.path.join(OUTPUT_BASE_DIR, "GT")
+    gt_wav_dir = os.path.join(gt_dir, "wavs")
+    gt_details_path = os.path.join(gt_dir, "details.csv")
+    os.makedirs(gt_wav_dir, exist_ok=True)
 
-        output_dir = os.path.join(OUTPUT_BASE_DIR, model_name)
-        os.makedirs(output_dir, exist_ok=True)
-        
-        details_path = os.path.join(output_dir, "details.csv")
-        
-        # ---------------------------------------------------------
-        # Check for existing results to skip evaluation
-        # ---------------------------------------------------------
-        if os.path.exists(details_path):
-            print(f"  [Skipping Generation & Eval] Found existing results: {details_path}")
-            try:
-                df = pd.read_csv(details_path)
-                # Ensure string columns are strings (pandas might interpret empty strings as NaN)
-                for col in ['gt_ns', 'pred_ns', 'gt_clean', 'pred_clean']:
-                    if col in df.columns:
-                        df[col] = df[col].fillna("").astype(str)
-                
-                # Verify essential columns exist
-                required_cols = ['gt_ns', 'pred_ns', 'gt_clean', 'pred_clean', 'utmos', 'cer']
-                if not all(col in df.columns for col in required_cols):
-                    print("  Warning: details.csv missing required columns. Re-evaluating...")
-                    df = None
-            except Exception as e:
-                print(f"  Error reading details.csv: {e}. Re-evaluating...")
-                df = None
-        else:
-            df = None
-
-        if df is None:
-            # ---------------------------------------------------------
-            # A. Audio Generation / Preparation
-            # ---------------------------------------------------------
-            files_to_eval = [] # List of (path, gt_text)
-
-        # ==========================================
-        # CASE 1: Ground Truth
-        # ==========================================
-        #  files_to_eval에 (audio_path, gt_text) 튜플을 저장
-        
-        if model_type == "ground_truth":
-            dataset_root = model_config.get('path', 'data/KSS')
-            print(f"  Locating Ground Truth files in {dataset_root}...")
-            
-            # Ground Truth는 생성 과정이 없으므로, df가 있더라도 파일 개수 확인 로그를 위해
-            # 파일을 찾는 것이 좋을 수 있음. 하지만 시간 절약을 위해 df가 있으면 건너뜀.
-            
-            if df is None:
-                found_count = 0
-                for item in test_items:
-                    gt_path = os.path.join(dataset_root, item['filename_raw'])
-                    if not os.path.exists(gt_path):
-                        gt_path = os.path.join(dataset_root, item['filename'])
-                    if os.path.exists(gt_path):
-                        files_to_eval.append((gt_path, item['text']))
-                        found_count += 1
-                print(f"  Found {found_count}/{len(test_items)} Ground Truth files.")
-            else:
-                 print(f"  (Skipping file search due to existing results)")
-
-        # ==========================================
-        # CASE 2: Existing Folder
-        # ==========================================
-        elif model_type == "existing":
-            if df is None:
-                existing_path = model_config.get('path', '')
-                print(f"  Using existing audio files from {existing_path}...")
-                
-                if not os.path.exists(existing_path):
-                    print(f"  Error: Directory {existing_path} does not exist.")
-                    continue
-                    
-                found_count = 0
-                for item in test_items:
-                    # Look for filename (basename) in the folder
-                    target_path = os.path.join(existing_path, item['filename'])
-                    if os.path.exists(target_path):
-                        files_to_eval.append((target_path, item['text']))
-                        found_count += 1
-                
-                print(f"  Found {found_count}/{len(test_items)} existing files.")
-
-        # ==========================================
-        # CASE 3: Inference
-        # ==========================================
-        else: # type == "inference"
-            if df is None:
-                # Initialize shared resources if needed
-                if vocoder is None:
-                    print(f"  Loading Vocoder ({VOCODER_NAME})...")
-                    vocoder = load_vocoder(vocoder_name=VOCODER_NAME, is_local=False, device=DEVICE)
-                
-                if ref_audio_processed is None:
-                    print("  Processing Reference Audio...")
-                    if not os.path.exists(REF_AUDIO):
-                        print(f"  Error: Reference audio {REF_AUDIO} not found.")
-                        continue
-                    try:
-                        ref_audio_processed, ref_text_processed = preprocess_ref_audio_text(REF_AUDIO, REF_TEXT)
-                    except Exception as e:
-                        print(f"  Error processing reference audio: {e}")
-                        continue
-
-                # Checkpoint check
-                ckpt_path = model_config['ckpt_path']
-                if not os.path.exists(ckpt_path):
-                    print(f"  [Skipping] Checkpoint not found: {ckpt_path}")
-                    parent_dir = os.path.dirname(ckpt_path)
-                    if os.path.exists(parent_dir):
-                        pts = list(Path(parent_dir).rglob("*.pt"))
-                        if pts:
-                            print(f"  Found alternative checkpoint: {pts[0]}")
-                            ckpt_path = str(pts[0])
-                        else:
-                            continue
-                    else:
-                        continue
-
-                # Load Model
-                try:
-                    cfg_path = model_config.get("model_cfg", "")
-                    if cfg_path and os.path.exists(cfg_path):
-                        conf = OmegaConf.load(cfg_path)
-                        model_arch_config = conf.model.arch
-                        model_cls_name = conf.model.backbone
-                    else:
-                        print(f"  Warning: Config file {cfg_path} not found. Using default parameters.")
-                        model_arch_config = dict(dim=1024, depth=22, heads=16, ff_mult=2, text_dim=512, conv_layers=4)
-                        model_cls_name = "DiT"
-                    
-                    model_cls = get_class(f"f5_tts.model.{model_cls_name}")
-                    
-                    vocab_file = model_config.get('vocab_file', "")
-                    tokenizer_type = model_config.get('tokenizer', "custom")
-                    
-                    model = load_model(
-                        model_cls=model_cls,
-                        model_cfg=model_arch_config,
-                        ckpt_path=ckpt_path,
-                        mel_spec_type=VOCODER_NAME,
-                        vocab_file=vocab_file,
-                        device=DEVICE,
-                        use_ema=True,
-                        tokenizer=tokenizer_type,
-                        use_n2gk_plus=True
-                    )
-                except Exception as e:
-                    print(f"  Error loading model {model_name}: {e}")
-                    import traceback
-                    traceback.print_exc()
-                    continue
-
-                # Generate Audio
-                print(f"  Generating {len(test_items)} sentences...")
-                
-                for i, item in enumerate(tqdm(test_items)):
-                    output_filename = os.path.basename(item["filename"])
-                    gen_text = item["text"]
-                    output_file = os.path.join(output_dir, output_filename)
-                    
-                    # Add to evaluation list (whether newly generated or skipped)
-                    
-                    if os.path.exists(output_file):
-                        files_to_eval.append((output_file, gen_text))
-                        continue
-
-                    try:
-                        audio, sr, spectrogram = infer_process(
-                            ref_audio_processed,
-                            ref_text_processed,
-                            gen_text,
-                            model,
-                            vocoder,
-                            mel_spec_type=VOCODER_NAME,
-                            target_rms=TARGET_RMS,
-                            cross_fade_duration=CROSS_FADE_DURATION,
-                            nfe_step=NFE_STEP,
-                            cfg_strength=CFG_STRENGTH,
-                            sway_sampling_coef=SWAY_SAMPLING_COEF,
-                            speed=SPEED,
-                            device=DEVICE,
-                        )
-                        sf.write(output_file, audio, sr)
-                        files_to_eval.append((output_file, gen_text))
-                    except Exception as e:
-                        print(f"    Error generating {output_filename}: {e}")
-                
-                # Filter files that actually exist (in case generation failed)
-                files_to_eval = [f for f in files_to_eval if os.path.exists(f[0])]
-
-            # ---------------------------------------------------------
-            # B. Evaluation Loop (UTMOS + CER + WER)
-            # ---------------------------------------------------------
-            if not files_to_eval:
-                print("No files to evaluate.")
-                continue
-
-            print(f"  Evaluating metrics for {len(files_to_eval)} files...")
-            
-            results = []
-            
-            gt_texts_no_space = [] # For Global CER
-            pred_texts_no_space = []
-            gt_texts_list = [] # For Global WER
-            pred_texts_list = []
-
-            for audio_path, raw_gt_text in tqdm(files_to_eval, desc="Evaluating"):
-                # 1. UTMOS
-                try:
-                    import librosa
-                    wav, sr = librosa.load(audio_path, sr=None, mono=True)
-                    wav_tensor = torch.from_numpy(wav).to(DEVICE).unsqueeze(0)
-                    with torch.no_grad():
-                        utmos_score = utmos_predictor(wav_tensor, sr).item()
-                except:
-                    utmos_score = 0.0
-
-                # 2. Whisper ASR
-                try:
-                    asr_res = whisper_model.transcribe(audio_path, language='ko', temperature=0.0)
-                    raw_pred_text = asr_res['text']
-                except Exception as e:
-                    print(f"ASR Error {audio_path}: {e}")
-                    raw_pred_text = ""
-
-                # 3. Post-process (N2gk+ -> Clean)
-                # GT
-                gt_n2gk = normalize_n2gk_plus(raw_gt_text)
-                gt_final = post_process_for_metric(gt_n2gk)
-                gt_final_ns = gt_final.replace(' ', '') # No space
-                
-                # Pred
-                pred_n2gk = normalize_n2gk_plus(raw_pred_text)
-                pred_final = post_process_for_metric(pred_n2gk)
-                pred_final_ns = pred_final.replace(' ', '') # No space
-
-                # 4. Calculate Individual Metrics
-                cer = min(1.0, jiwer.cer(gt_final_ns, pred_final_ns)) if gt_final_ns else 1.0
-                wer = min(1.0, jiwer.wer(gt_final, pred_final)) if gt_final else 1.0
-                
-                results.append({
-                    "filename": os.path.basename(audio_path),
-                    "utmos": utmos_score,
-                    "cer": cer,
-                    "wer": wer,
-                    "gt_ns": gt_final_ns, # Saved for micro-avg calculation
-                    "pred_ns": pred_final_ns,
-                    "gt_clean": gt_final,
-                    "pred_clean": pred_final
+    # Check if GT results exist
+    gt_done = False
+    if os.path.exists(gt_details_path):
+        try:
+            df = pd.read_csv(gt_details_path)
+            if len(df) == total_items:
+                gt_done = True
+                print(f"[GT] Results found. Loading...")
+                final_summary.append({
+                    "Model": "GroundTruth", "Step": "N/A",
+                    "CER": df['cer'].mean(), "WER": df['wer'].mean(),
+                    "UTMOS": df['utmos'].mean(), "SIM": df['sim'].mean()
                 })
+        except: pass
 
-            # ---------------------------------------------------------
-            # C. Statistics & Summary
-            # ---------------------------------------------------------
-            df = pd.DataFrame(results)
-            # Save Details
-            df.to_csv(os.path.join(output_dir, "details.csv"), index=False, encoding="utf-8-sig")
+    if not gt_done:
+        print(f"\n==================================================")
+        print(f"Evaluating Ground Truth (GT)")
+        print(f"==================================================")
         
-        # 1. Global Metrics (Micro-average using jiwer on full list)
-        global_cer = min(1.0, jiwer.cer(df['gt_ns'].tolist(), df['pred_ns'].tolist()))
-        global_wer = min(1.0, jiwer.wer(df['gt_clean'].tolist(), df['pred_clean'].tolist()))
-        
-        mean_utmos = df['utmos'].mean()
+        # Prepare GT wavs (Symlink)
+        print(f"[GT] Preparing audio files in {gt_wav_dir}...")
+        for item in test_items:
+            src_path = os.path.join(DATA_ROOT, item['path'])
+            dst_path = os.path.join(gt_wav_dir, os.path.basename(item['path']))
+            if not os.path.exists(dst_path):
+                try:
+                    os.symlink(os.path.abspath(src_path), dst_path)
+                except OSError:
+                    import shutil
+                    shutil.copy(src_path, dst_path)
 
-        # 2. SFR (Synthesis Failure Rate): CER > 0.5
-        fail_count = len(df[df['cer'] > 0.5])
-        total_count = len(df)
-        sfr = (fail_count / total_count) * 100 if total_count > 0 else 0.0
+        # Load models
+        if whisper_model is None: whisper_model = load_whisper_model()
+        if utmos_predictor is None: utmos_predictor = load_utmos_model()
+        if wavlm_model is None: wavlm_bundle, wavlm_model = load_wavlm_sim_model()
 
-        # 3. Valid CER (Micro-average using jiwer on valid list)
-        valid_df = df[df['cer'] <= 0.5]
-        if not valid_df.empty:
-            valid_mean_cer = min(1.0, jiwer.cer(valid_df['gt_ns'].tolist(), valid_df['pred_ns'].tolist()))
-        else:
-            valid_mean_cer = 0.0
+        # Bulk UTMOS
+        gt_utmos_results = {}
+        if utmos_predictor is not None:
+            print(f"[GT] Running bulk UTMOS prediction...")
+            try:
+                bulk_preds = utmos_predictor.predict(input_dir=gt_wav_dir, device=DEVICE, verbose=False)
+                for p in bulk_preds:
+                    fname = os.path.basename(p['file_path'])
+                    gt_utmos_results[fname] = p['predicted_mos']
+            except Exception as e:
+                print(f"GT UTMOS Error: {e}")
+
+        gt_metrics = []
+        for item in tqdm(test_items, desc="Evaluating GT"):
+            test_fname = os.path.basename(item['path'])
+            wav_path = os.path.join(gt_wav_dir, test_fname)
             
-        # 4. Worst Case
-        worst_row = df.loc[df['cer'].idxmax()] if not df.empty else None
+            # Transcribe
+            try:
+                asr_out = whisper_model.transcribe(wav_path, language='ko', temperature=0.0)
+                pred_text = asr_out['text']
+            except:
+                print(f"Whisper Error: {e}")
+                pred_text = ""
 
-        # Print Model Summary
-        print(f"\n[Result: {model_name}]")
-        print(f"  UTMOS: {mean_utmos:.4f}")
-        print(f"  CER(Global): {global_cer:.4f}")
-        print(f"  WER: {global_wer:.4f}")
-        print(f"  CER(Valid): {valid_mean_cer:.4f}")
-        print(f"  SFR: {sfr:.2f}% ({fail_count}/{total_count} failed)")
-        
-        if worst_row is not None:
-            print(f"  Worst Case (CER: {worst_row['cer']:.4f}):")
-            print(f"    GT  : {worst_row['gt_clean']}")
-            print(f"    Pred: {worst_row['pred_clean']}")
+            gt_clean = post_process_for_metric(normalize_n2gk_plus(item['text']))
+            pred_clean = post_process_for_metric(normalize_n2gk_plus(pred_text))
+            gt_ns = gt_clean.replace(" ", "")
+            pred_ns = pred_clean.replace(" ", "")
 
-        # Save Details
-        df.to_csv(os.path.join(output_dir, "details.csv"), index=False, encoding="utf-8-sig")
+            cer = min(1.0, jiwer.cer(gt_ns, pred_ns)) if gt_ns else 1.0
+            wer = min(1.0, jiwer.wer(gt_clean, pred_clean)) if gt_clean else 1.0
+            
+            utmos_score = gt_utmos_results.get(test_fname, np.nan)
+            
+            sim_score = np.nan
+            ref_item = ref_mapping.get(item['path'])
+            if ref_item:
+                ref_wav_path = os.path.join(DATA_ROOT, ref_item['path'])
+                if os.path.exists(ref_wav_path) and wavlm_model is not None:
+                    sim_score = calculate_sim(wavlm_bundle, wavlm_model, ref_wav_path, wav_path)
+
+            gt_metrics.append({
+                "filename": test_fname, "gt": gt_clean, "pred": pred_clean,
+                "cer": cer, "wer": wer, "utmos": utmos_score, "sim": sim_score
+            })
+
+        df_gt = pd.DataFrame(gt_metrics)
+        df_gt.to_csv(gt_details_path, index=False, encoding='utf-8-sig')
         
-        final_summary_rows.append({
-            "Model": model_name,
-            "CER(Global)": f"{global_cer:.4f}",
-            "WER": f"{global_wer:.4f}",
-            "CER(Valid)": f"{valid_mean_cer:.4f}",
-            "SFR (%)": f"{sfr:.2f}",
-            "UTMOS": f"{mean_utmos:.4f}",
+        mean_cer = df_gt['cer'].mean()
+        mean_wer = df_gt['wer'].mean()
+        mean_utmos = df_gt['utmos'].mean()
+        mean_sim = df_gt['sim'].mean()
+        
+        print(f"[GT] Result -> CER: {mean_cer:.4f}, WER: {mean_wer:.4f}, UTMOS: {mean_utmos:.4f}, SIM: {mean_sim:.4f}")
+        
+        final_summary.append({
+            "Model": "GroundTruth", "Step": "N/A",
+            "CER": mean_cer, "WER": mean_wer,
+            "UTMOS": mean_utmos, "SIM": mean_sim
         })
 
-    # ---------------------------------------------------------
-    # D. Final Report Table
-    # ---------------------------------------------------------
-    print("\n" + "="*80)
-    print("FINAL EVALUATION SUMMARY")
-    print("="*80)
-    summary_df = pd.DataFrame(final_summary_rows)
-    print(summary_df.to_string(index=False))
     
-    summary_path = os.path.join(OUTPUT_BASE_DIR, "final_summary.csv")
-    summary_df.to_csv(summary_path, index=False, encoding="utf-8-sig")
-    print(f"\nSummary saved to {summary_path}")
+    for mode in TARGET_MODES:
+        dataset_name = MODE_MAP.get(mode, mode)
+        
+        candidates_dirs = [
+            f"F5TTS_Base_vocos_KSS_n2gk_{dataset_name}_lora",
+            f"F5TTS_Base_vocos_custom_KSS_n2gk_{dataset_name}_lora",
+            f"F5TTS_Base_vocos_custom_KSS_{dataset_name}_lora"
+        ]
+        ckpt_dir = None
+        for d in candidates_dirs:
+            if os.path.exists(os.path.join("ckpts", d)):
+                ckpt_dir = os.path.join("ckpts", d)
+                break
+        
+        if not ckpt_dir: ckpt_dir = os.path.join("ckpts", candidates_dirs[0])
+        
+        if mode == "inf-h":
+            tokenizer_name = "kor_efficient_allophone"
+            config_path = f"src/f5_tts/configs/F5TTS_Base_ft_Lora_A100_{mode}.yaml"
+            if not os.path.exists(config_path): config_path = f"src/f5_tts/configs/F5TTS_Base_ft_Lora_A100_{dataset_name}.yaml"
+        elif mode == "inf":
+            tokenizer_name = "kor_inf"
+            config_path = f"src/f5_tts/configs/F5TTS_Base_ft_Lora_A100_{mode}.yaml"
+        elif mode == "nf":
+            tokenizer_name = "kor_nf"
+            config_path = f"src/f5_tts/configs/F5TTS_Base_ft_Lora_A100_{mode}.yaml"
+        else:
+            tokenizer_name = f"kor_{mode}"
+            config_path = f"src/f5_tts/configs/F5TTS_Base_ft_Lora_A100_{mode}.yaml"
+
+        print(f"\n==================================================")
+        print(f"Evaluating Mode: {mode} (Dir: {ckpt_dir})")
+        print(f"==================================================")
+
+        for step in EVAL_STEPS:
+            model_id = f"{mode}_{step}K"
+            output_dir = os.path.join(OUTPUT_BASE_DIR, model_id)
+            os.makedirs(output_dir, exist_ok=True)
+            details_csv_path = os.path.join(output_dir, "details.csv")
+            
+            existing_wavs = [f for f in os.listdir(output_dir) if f.endswith(".wav")]
+            is_generation_complete = (len(existing_wavs) >= total_items)
+            
+            is_result_complete = False
+            if os.path.exists(details_csv_path):
+                try:
+                    df = pd.read_csv(details_csv_path)
+                    required_cols = ['cer', 'wer', 'utmos', 'sim']
+                    has_cols = all(col in df.columns for col in required_cols)
+                    if len(df) == total_items and has_cols:
+                        is_result_complete = True
+                except: pass
+
+            if is_result_complete:
+                print(f"[{model_id}] Results complete. Skipping.")
+                try:
+                    df = pd.read_csv(details_csv_path)
+                    final_summary.append({
+                        "Model": mode, "Step": step,
+                        "CER": df['cer'].mean(), "WER": df['wer'].mean(),
+                        "UTMOS": df['utmos'].mean(), "SIM": df['sim'].mean()
+                    })
+                except: pass
+                continue
+
+            if not is_generation_complete:
+                print(f"[{model_id}] Generation incomplete ({len(existing_wavs)}/{total_items}). Generating missing...")
+                ckpt_filename = f"model_{step}000.pt"
+                ckpt_path = os.path.join(ckpt_dir, ckpt_filename)
+                
+                if not os.path.exists(ckpt_path):
+                    print(f"[{model_id}] Checkpoint not found: {ckpt_path}")
+                    continue
+
+                try:
+                    if vocoder is None: vocoder = load_vocoder_model()
+                    if not os.path.exists(config_path):
+                        model_arch_config = dict(dim=1024, depth=22, heads=16, ff_mult=2, text_dim=512, conv_layers=4)
+                        model_cls_name = "DiT"
+                    else:
+                        conf = OmegaConf.load(config_path)
+                        model_arch_config = conf.model.arch
+                        model_cls_name = conf.model.backbone
+                    model_cls = get_class(f"f5_tts.model.{model_cls_name}")
+                    model = load_model(
+                        model_cls=model_cls, model_cfg=model_arch_config,
+                        ckpt_path=ckpt_path, mel_spec_type=VOCODER_NAME,
+                        vocab_file="ckpts/pretrained/vocab_pretr.txt",
+                        device=DEVICE, use_ema=True, tokenizer=tokenizer_name, use_n2gk_plus=True
+                    )
+                except Exception as e:
+                    print(f"[{model_id}] Error loading model: {e}")
+                    continue
+
+                for item in tqdm(test_items, desc="Generating"):
+                    test_fname = os.path.basename(item['path'])
+                    output_wav_path = os.path.join(output_dir, test_fname)
+                    if os.path.exists(output_wav_path): continue
+                    
+                    ref_item = ref_mapping.get(item['path'])
+                    ref_audio, ref_text = None, None
+                    if ref_item:
+                        if ref_item['path'] in ref_cache:
+                            ref_audio, ref_text = ref_cache[ref_item['path']]
+                        else:
+                            try:
+                                ref_path_full = os.path.join(DATA_ROOT, ref_item['path'])
+                                ref_audio, ref_text = preprocess_ref_audio_text(ref_path_full, ref_item['text'], show_info=lambda x: None)
+                                ref_cache[ref_item['path']] = (ref_audio, ref_text)
+                            except: pass
+                    if ref_audio is None:
+                        try:
+                            ref_audio, ref_text = preprocess_ref_audio_text(os.path.join(DATA_ROOT, "1/1_0001.wav"), "Fallback ref.")
+                        except: pass
+
+                    try:
+                        audio, sr, _ = infer_process(
+                            ref_audio, ref_text, item['text'],
+                            model, vocoder, mel_spec_type=VOCODER_NAME,
+                            target_rms=TARGET_RMS, cross_fade_duration=CROSS_FADE_DURATION,
+                            nfe_step=NFE_STEP, cfg_strength=CFG_STRENGTH,
+                            sway_sampling_coef=SWAY_SAMPLING_COEF, speed=SPEED,
+                            device=DEVICE, show_info=lambda x: None,
+                            progress=None
+                        )
+                        sf.write(output_wav_path, audio, sr)
+                    except Exception as e:
+                        print(f"Failed to generate {test_fname}: {e}")
+                del model
+                torch.cuda.empty_cache()
+            else:
+                print(f"[{model_id}] Generation complete. Proceeding to evaluation.")
+
+            if whisper_model is None: whisper_model = load_whisper_model()
+            
+            should_run_utmos = (step in UTMOS_STEPS)
+            if should_run_utmos and utmos_predictor is None: utmos_predictor = load_utmos_model()
+            
+            should_run_sim = (step in SIM_STEPS)
+            if should_run_sim and wavlm_model is None: wavlm_bundle, wavlm_model = load_wavlm_sim_model()
+
+            actual_run_utmos = should_run_utmos and (utmos_predictor is not None)
+            actual_run_sim = should_run_sim and (wavlm_model is not None)
+
+            # Bulk UTMOS Prediction
+            utmos_results = {}
+            if actual_run_utmos:
+                try:
+                    # Predict entire directory at once
+                    # utmosv2 predict returns list of dicts: [{'file_path': ..., 'predicted_mos': ...}]
+                    print(f"[{model_id}] Running bulk UTMOS prediction on {output_dir}...")
+                    bulk_preds = utmos_predictor.predict(input_dir=output_dir, device=DEVICE, verbose=False)
+                    for p in bulk_preds:
+                        fname = os.path.basename(p['file_path'])
+                        utmos_results[fname] = p['predicted_mos']
+                except Exception as e:
+                    print(f"UTMOS Bulk Error: {e}")
+
+            eval_metrics = []
+            print(f"[{model_id}] Calculating Metrics (UTMOS={actual_run_utmos}, SIM={actual_run_sim})...")
+            
+            for item in tqdm(test_items, desc="Evaluating"):
+                test_fname = os.path.basename(item['path'])
+                output_wav_path = os.path.join(output_dir, test_fname)
+                if not os.path.exists(output_wav_path): continue
+                
+                try:
+                    asr_out = whisper_model.transcribe(output_wav_path, language='ko', temperature=0.0)
+                    pred_text = asr_out['text']
+                except:
+                    print(f"Whisper Error: {e}")
+                    pred_text = ""
+                
+                gt_clean = post_process_for_metric(normalize_n2gk_plus(item['text']))
+                pred_clean = post_process_for_metric(normalize_n2gk_plus(pred_text))
+                gt_ns = gt_clean.replace(" ", "")
+                pred_ns = pred_clean.replace(" ", "")
+                
+                cer = min(1.0, jiwer.cer(gt_ns, pred_ns)) if gt_ns else 1.0
+                wer = min(1.0, jiwer.wer(gt_clean, pred_clean)) if gt_clean else 1.0
+                
+                # Get UTMOS from bulk results
+                utmos_score = utmos_results.get(test_fname, np.nan)
+                
+                sim_score = np.nan
+                if actual_run_sim:
+                    ref_item = ref_mapping.get(item['path'])
+                    if ref_item:
+                        ref_wav_path = os.path.join(DATA_ROOT, ref_item['path'])
+                        if os.path.exists(ref_wav_path):
+                            sim_score = calculate_sim(wavlm_bundle, wavlm_model, ref_wav_path, output_wav_path)
+                
+                eval_metrics.append({
+                    "filename": test_fname, "gt": gt_clean, "pred": pred_clean,
+                    "cer": cer, "wer": wer, "utmos": utmos_score, "sim": sim_score
+                })
+
+            df_res = pd.DataFrame(eval_metrics)
+            df_res.to_csv(details_csv_path, index=False, encoding='utf-8-sig')
+            
+            mean_cer = df_res['cer'].mean()
+            mean_wer = df_res['wer'].mean()
+            mean_utmos = df_res['utmos'].mean()
+            mean_sim = df_res['sim'].mean()
+            
+            print(f"[{model_id}] Result -> CER: {mean_cer:.4f}, WER: {mean_wer:.4f}, UTMOS: {mean_utmos:.4f}, SIM: {mean_sim:.4f}")
+            
+            final_summary.append({
+                "Model": mode, "Step": step,
+                "CER": mean_cer, "WER": mean_wer,
+                "UTMOS": mean_utmos if actual_run_utmos else "",
+                "SIM": mean_sim if actual_run_sim else ""
+            })
+
+    if final_summary:
+        df_summary = pd.DataFrame(final_summary)
+        print("\n" + "="*80)
+        print("FINAL EVALUATION REPORT")
+        print("="*80)
+        print(df_summary.to_string(index=False))
+        save_path = os.path.join(OUTPUT_BASE_DIR, "evaluation_summary_comprehensive.csv")
+        df_summary.to_csv(save_path, index=False, encoding='utf-8-sig')
+        print(f"\nReport saved to: {save_path}")
 
 if __name__ == "__main__":
     run_evaluation()
