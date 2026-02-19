@@ -5,8 +5,8 @@ hydra:
     dir: ckpts/${model.name}_${model.mel_spec.mel_spec_type}_${datasets.name}_lora/${now:%Y-%m-%d}/${now:%H-%M-%S}
 
 datasets:
-  name: KSS_no_ieung_g2p
-  load_path: data/KSS_no_ieung_g2p
+  name: KSS_n2gk_no_ieung_g2p
+  load_path: data/KSS_n2gk_no_ieung_g2p
   batch_size_per_gpu: 19200
   batch_size_type: frame
   max_samples: 64
