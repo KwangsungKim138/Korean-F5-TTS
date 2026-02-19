@@ -1,0 +1,59 @@
+# LoRA fine-tuning: pretrained base + vocab_pretr + N2gk+ -> g2p -> allophone dataset.
+# See README or train/README.md for step-by-step.
+
+hydra:
+  run:
+    dir: ckpts/${model.name}_${model.mel_spec.mel_spec_type}_${model.tokenizer}_${datasets.name}_lora/${now:%Y-%m-%d}/${now:%H-%M-%S}
+
+datasets:
+  name: KSS_1h_n2gk_allophone  # used for save_dir naming; actual data path = load_path if set
+  load_path: data/KSS_1h_n2gk_allophone  # N2gk+ -> g2p -> allophone prepared data (raw.arrow, duration.json, vocab from prepare_kss_n2gk_allophone)
+  batch_size_per_gpu: 19200
+  batch_size_type: frame
+  max_samples: 64
+  num_workers: 8
+
+optim:
+  epochs: 20000
+  learning_rate: 1e-5
+  num_warmup_updates: 100
+  grad_accumulation_steps: 1
+  max_grad_norm: 1.0
+  bnb_optimizer: False
+
+model:
+  name: F5TTS_Base
+  tokenizer: custom  # use tokenizer_path for vocab
+  tokenizer_path: ckpts/pretrained/vocab_pretr.txt
+  backbone: DiT
+  arch:
+    dim: 1024
+    depth: 22
+    heads: 16
+    ff_mult: 2
+    text_dim: 512
+    text_mask_padding: False
+    conv_layers: 4
+    pe_attn_head: 1
+    attn_backend: flash_attn
+    attn_mask_enabled: False
+    checkpoint_activations: False
+  mel_spec:
+    target_sample_rate: 24000
+    n_mel_channels: 100
+    hop_length: 256
+    win_length: 1024
+    n_fft: 1024
+    mel_spec_type: vocos
+  vocoder:
+    is_local: False
+    local_path: null
+
+ckpts:
+  pretrained_path: ckpts/pretrained/model_pretrained_1200000.pt  # base weights for LoRA
+  logger: wandb
+  log_samples: True
+  save_per_updates: 2500
+  keep_last_n_checkpoints: -1
+  last_per_updates: 1000
+  save_dir: ckpts/${model.name}_${model.mel_spec.mel_spec_type}_${model.tokenizer}_${datasets.name}_lora

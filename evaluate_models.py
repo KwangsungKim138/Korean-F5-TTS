@@ -58,11 +58,14 @@ except ImportError:
 
 # Models to Evaluate
 TARGET_MODES = [
-    "allophone", "phoneme", 
+    "i_and_c", 
+    "inf-h", 
+    "c_only", 
+    "i_only", 
+    "nf", 
+    "phoneme", "allophone", 
     "n_only", "i_and_n", "inf",
-    "grapheme", "nf",
-    "i_only", "c_only", "i_and_c", 
-    "inf-h",    
+    "grapheme",
 ]
 
 # Step Ranges
@@ -78,12 +81,9 @@ MODE_MAP = {
 # Data Paths
 DATA_ROOT = "data/KSS"
 TEST_TXT_PATH = os.path.join(DATA_ROOT, "test.txt")
-TRAIN_TXT_PATH = os.path.join(DATA_ROOT, "train_full.txt")
 
 if not os.path.exists(TEST_TXT_PATH) and os.path.exists("test.txt"):
     TEST_TXT_PATH = "test.txt"
-if not os.path.exists(TRAIN_TXT_PATH) and os.path.exists("train_full.txt"):
-    TRAIN_TXT_PATH = "train_full.txt"
 
 OUTPUT_BASE_DIR = "eval_results"
 
@@ -125,34 +125,25 @@ def is_valid_candidate(text):
     if '.' in text[:-1]: return False
     return True
 
-def build_reference_mapping(test_path, train_path):
-    print("Building optimal reference mapping...")
+def build_reference_mapping(test_path):
+    print("Building strict reverse reference mapping from test set...")
     test_items = []
+    
+    # 1. test.txt에서 순서대로 모든 문장(100개)을 읽어옵니다.
     with open(test_path, 'r', encoding='utf-8') as f:
         for line in f:
             item = parse_kss_line(line)
-            if item: test_items.append(item)
-    
-    candidates = []
-    with open(train_path, 'r', encoding='utf-8') as f:
-        for line in f:
-            item = parse_kss_line(line)
-            if item and is_valid_candidate(item['text']): candidates.append(item)
+            if item: 
+                test_items.append(item)
     
     mapping = {}
-    for t_item in test_items:
-        t_dur = t_item['duration']
-        t_chars = get_pure_char_count(t_item['text'])
-        t_punct = get_target_punctuation(t_item['text'])
-        
-        target_dur = max(t_chars * CHAR_DURATION_RATIO, MIN_DURATION)
-        
-        strict_pool = [c for c in candidates if get_pure_char_count(c['text']) == t_chars and get_target_punctuation(c['text']) == t_punct]
-        char_pool = [c for c in candidates if get_pure_char_count(c['text']) == t_chars] if not strict_pool else []
-        pool = strict_pool if strict_pool else (char_pool if char_pool else candidates)
-        
-        best_cand = min(pool, key=lambda c: abs(c['duration'] - target_dur))
-        if best_cand: mapping[t_item['path']] = best_cand
+    total_items = len(test_items)
+    
+    # 2. i번째 문장의 레퍼런스로 (총 길이 - 1 - i)번째 문장을 할당합니다.
+    # (예: 0번 인덱스는 99번 인덱스와, 1번 인덱스는 98번 인덱스와 매칭)
+    for i, t_item in enumerate(test_items):
+        ref_index = total_items - 1 - i
+        mapping[t_item['path']] = test_items[ref_index]
             
     return test_items, mapping
 
@@ -232,11 +223,11 @@ def calculate_sim(bundle, model, ref_path, gen_path):
 # --------------------------
 
 def run_evaluation():
-    if not os.path.exists(TEST_TXT_PATH) or not os.path.exists(TRAIN_TXT_PATH):
+    if not os.path.exists(TEST_TXT_PATH):
         print(f"Error: Dataset files not found.")
         return
 
-    test_items, ref_mapping = build_reference_mapping(TEST_TXT_PATH, TRAIN_TXT_PATH)
+    test_items, ref_mapping = build_reference_mapping(TEST_TXT_PATH)
     total_items = len(test_items)
     
     vocoder = None
@@ -265,9 +256,14 @@ def run_evaluation():
             if len(df) == total_items:
                 gt_done = True
                 print(f"[GT] Results found. Loading...")
+                refs_gt = df['gt'].fillna("").tolist()
+                hyps_gt = df['pred'].fillna("").tolist()
+                refs_cer = [r.replace(" ", "") for r in refs_gt]
+                hyps_cer = [h.replace(" ", "") for h in hyps_gt]
                 final_summary.append({
                     "Model": "GroundTruth", "Step": "N/A",
-                    "CER": df['cer'].mean(), "WER": df['wer'].mean(),
+                    "CER": min(1.0, jiwer.cer(refs_cer, hyps_cer)) if refs_cer else 0.0,
+                    "WER": min(1.0, jiwer.wer(refs_gt, hyps_gt)) if refs_gt else 0.0,
                     "UTMOS": df['utmos'].mean(), "SIM": df['sim'].mean()
                 })
         except: pass
@@ -344,8 +340,13 @@ def run_evaluation():
         df_gt = pd.DataFrame(gt_metrics)
         df_gt.to_csv(gt_details_path, index=False, encoding='utf-8-sig')
         
-        mean_cer = df_gt['cer'].mean()
-        mean_wer = df_gt['wer'].mean()
+        # Corpus-level CER/WER (total edits / total ref units); UTMOS/SIM are mean over utterances (standard)
+        refs_gt = df_gt['gt'].fillna("").tolist()
+        hyps_gt = df_gt['pred'].fillna("").tolist()
+        refs_cer = [r.replace(" ", "") for r in refs_gt]
+        hyps_cer = [h.replace(" ", "") for h in hyps_gt]
+        mean_cer = min(1.0, jiwer.cer(refs_cer, hyps_cer)) if refs_cer else 0.0
+        mean_wer = min(1.0, jiwer.wer(refs_gt, hyps_gt)) if refs_gt else 0.0
         mean_utmos = df_gt['utmos'].mean()
         mean_sim = df_gt['sim'].mean()
         
@@ -415,9 +416,14 @@ def run_evaluation():
                 print(f"[{model_id}] Results complete. Skipping.")
                 try:
                     df = pd.read_csv(details_csv_path)
+                    refs = df['gt'].fillna("").tolist()
+                    hyps = df['pred'].fillna("").tolist()
+                    refs_cer = [r.replace(" ", "") for r in refs]
+                    hyps_cer = [h.replace(" ", "") for h in hyps]
                     final_summary.append({
                         "Model": mode, "Step": step,
-                        "CER": df['cer'].mean(), "WER": df['wer'].mean(),
+                        "CER": min(1.0, jiwer.cer(refs_cer, hyps_cer)) if refs_cer else 0.0,
+                        "WER": min(1.0, jiwer.wer(refs, hyps)) if refs else 0.0,
                         "UTMOS": df['utmos'].mean(), "SIM": df['sim'].mean()
                     })
                 except: pass
@@ -558,8 +564,13 @@ def run_evaluation():
             df_res = pd.DataFrame(eval_metrics)
             df_res.to_csv(details_csv_path, index=False, encoding='utf-8-sig')
             
-            mean_cer = df_res['cer'].mean()
-            mean_wer = df_res['wer'].mean()
+            # Corpus-level CER/WER; UTMOS/SIM are mean over utterances (standard)
+            refs = df_res['gt'].fillna("").tolist()
+            hyps = df_res['pred'].fillna("").tolist()
+            refs_cer = [r.replace(" ", "") for r in refs]
+            hyps_cer = [h.replace(" ", "") for h in hyps]
+            mean_cer = min(1.0, jiwer.cer(refs_cer, hyps_cer)) if refs_cer else 0.0
+            mean_wer = min(1.0, jiwer.wer(refs, hyps)) if refs else 0.0
             mean_utmos = df_res['utmos'].mean()
             mean_sim = df_res['sim'].mean()
             

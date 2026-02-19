@@ -24,6 +24,13 @@ DATASETS_TO_ANALYZE = [
     "data/KSS_n2gk_n_only",
     "data/KSS_n2gk_i_and_c",
     "data/KSS_n2gk_i_and_n",
+    "data/KSS_n2gk_inf",
+    "data/KSS_n2gk_nf",
+    "data/KSS_n2gk_efficient_allophone",
+    "data/KSS_1h_n2gk_grapheme",
+    "data/KSS_1h_n2gk_phoneme",
+    "data/KSS_1h_n2gk_allophone",
+    "data/KSS_1h_n2gk_inf",
 ]
 
 # --- Constants & Regex ---
