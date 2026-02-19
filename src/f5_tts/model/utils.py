@@ -126,7 +126,7 @@ def get_tokenizer(dataset_name, tokenizer: str = "pinyin"):
                 - if use "kor_phoneme", derived from phonemes
                 - if use "byte", set to 256 (unicode byte range)
     """
-    if tokenizer in ["pinyin", "char", "kor_grapheme", "kor_allophone", "kor_phoneme", "kor_i_only", "kor_c_only", "kor_i_and_c", "kor_n_only", "kor_i_and_n", "kor_efficient_allophone", "kor_inf", "kor_nf"]:
+    if tokenizer in ["pinyin", "char", "kor_grapheme", "kor_allophone", "kor_phoneme", "kor_i_only", "kor_c_only", "kor_i_and_c", "kor_n_only", "kor_i_and_n", "kor_efficient_allophone", "kor_inf", "kor_nf", "kor_no_ieung_g2p", "kor_no_ieung_raw"]:
         tokenizer_path = os.path.join(files("f5_tts").joinpath("../../data"), f"{dataset_name}_{tokenizer}/vocab.txt")
         with open(tokenizer_path, "r", encoding="utf-8") as f:
             vocab_char_map = {}
@@ -421,6 +421,56 @@ def convert_char_to_phoneme(text_list: list[str]) -> list[list[str]]:
             result.append(" ")
         if result and result[-1] == " ":
             result.pop()
+        final_text_list.append(result)
+    return final_text_list
+
+
+def convert_char_to_no_ieung_g2p(text_list: list[str]) -> list[list[str]]:
+    """
+    Korean Phoneme (G2P applied) with initial 'ieung' removed.
+    Example: '안녕하세요' -> [ㅏ, ㄴ, ㄴ, ㅕ, ... ] (초성 ㅇ 제거)
+    """
+    final_text_list = []
+    for text in text_list:
+        result = []
+        pronunciation = _text_to_pronunciation(text)
+        eojeols = _pronunciation_to_eojeols(pronunciation)
+        for eojeol in eojeols:
+            for syllable in eojeol:
+                phonemes = _syllable_to_phonemes(syllable)
+                # phonemes = [cho, jung, jong]
+                # If cho is 'ㅇ', remove it. Keep jung and jong (if exists).
+                if len(phonemes) >= 1 and phonemes[0] == "ㅇ":
+                    # Skip initial ieung
+                    result.extend([p for p in phonemes[1:] if p])
+                else:
+                    result.extend([p for p in phonemes if p])
+            result.append(" ")
+        if result and result[-1] == " ":
+            result.pop()
+        final_text_list.append(result)
+    return final_text_list
+
+
+def convert_char_to_no_ieung_raw(text_list: list[str]) -> list[list[str]]:
+    """
+    Korean Raw Grapheme (No G2P) with initial 'ieung' removed.
+    """
+    final_text_list = []
+    for text in text_list:
+        result = []
+        for char in text:
+            if char == " ":
+                result.append(" ")
+            else:
+                graphemes = _syllable_to_phonemes(char)
+                # graphemes = [cho, jung, jong]
+                # If cho is 'ㅇ', remove it. Keep jung and jong (if exists).
+                if len(graphemes) >= 1 and graphemes[0] == "ㅇ":
+                    # Skip initial ieung
+                    result.extend([p for p in graphemes[1:] if p])
+                else:
+                    result.extend([p for p in graphemes if p])
         final_text_list.append(result)
     return final_text_list
 

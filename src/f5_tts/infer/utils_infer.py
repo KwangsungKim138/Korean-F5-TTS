@@ -632,6 +632,19 @@ def infer_batch_process(
                     initial_filter=initial_filter
                 )
 
+            # 2-c. No Initial Ieung Modes
+            elif tokenizer_type == "kor_no_ieung_g2p":
+                if use_n2gk:
+                    text_list = [normalize_n2gk_plus(t) for t in text_list]
+                from f5_tts.model.utils import convert_char_to_no_ieung_g2p
+                final_text_list = convert_char_to_no_ieung_g2p(text_list)
+
+            elif tokenizer_type == "kor_no_ieung_raw":
+                if use_n2gk:
+                    text_list = [normalize_n2gk_plus(t) for t in text_list]
+                from f5_tts.model.utils import convert_char_to_no_ieung_raw
+                final_text_list = convert_char_to_no_ieung_raw(text_list)
+
             # 3. Phoneme (Explicit or Implicit)
             elif tokenizer_type == "kor_phoneme" or (tokenizer_type == "custom" and "ㄱ" in vocab):
                 if use_n2gk:
