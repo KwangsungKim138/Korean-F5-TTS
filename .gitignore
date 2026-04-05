@@ -7,6 +7,7 @@ ckpts/
 wandb/
 results/
 eval_results/
+is2026/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
