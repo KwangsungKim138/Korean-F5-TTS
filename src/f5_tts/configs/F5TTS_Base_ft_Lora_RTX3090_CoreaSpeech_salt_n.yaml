@@ -1,7 +1,6 @@
 # LoRA fine-tuning for CoreaSpeech (salt-n mode) on RTX 3090 (24GB VRAM)
 # Based on paper settings: 
-# - LoRA rank 16 for prompt adapter, rank 64 for DiT LoRA
-# - DropPath rate 0.3
+# - LoRA rank 64 for prompt adapter, rank 16 for DiT LoRA
 # - AdamW optimizer, learning rate 1e-5
 # - 24kHz sample rate
 
@@ -21,7 +20,7 @@ optim:
   epochs: 10000
   learning_rate: 1e-5
   num_warmup_updates: 1000
-  grad_accumulation_steps: 2  # To compensate for smaller batch size
+  grad_accumulation_steps: 1
   max_grad_norm: 1.0
   bnb_optimizer: False
 
