@@ -23,7 +23,8 @@ def main():
     valid_txt = os.path.join(data_root, "metadata_valid.txt")
     
     config_path = "src/f5_tts/configs/F5TTS_Base_ft_Lora_RTX3090_CoreaSpeech_grapheme.yaml"
-    vocab_path = "data/CoreaSpeech_grapheme/vocab.txt"
+    vocab_path = "ckpts/pretrained/vocab_pretr.txt" 
+    
     output_dir = "eval_results/coreaspeech_valid"
     os.makedirs(output_dir, exist_ok=True)
 
@@ -32,13 +33,51 @@ def main():
     with open(valid_txt, 'r', encoding='utf-8') as f:
         for line in f:
             parts = line.strip().split('|')
-            if len(parts) >= 2:
+            if len(parts) >= 5: # duration이 있는 5번째 열까지 확인
                 wav_path = os.path.join(data_root, parts[0]) # 예: wav/파일명.wav
                 raw_text = parts[1] # 인덱스 1: 원본 한국어 텍스트
+                speaker_id = parts[3] # 인덱스 3: 화자 ID
+                
+                # JSON 형태의 5번째 열 파싱 대신, 실제 오디오 파일을 읽어서 길이를 확인하거나
+                # metadata_train.txt처럼 duration 정보가 있다면 그걸 쓰면 좋지만,
+                # 현재 metadata_valid.txt 구조상 sf.info로 직접 길이를 확인합니다.
                 if os.path.exists(wav_path):
-                    valid_data.append((wav_path, raw_text))
+                    try:
+                        duration = sf.info(wav_path).duration
+                        # 10초 ~ 15초 사이의 오디오만 필터링
+                        if 10.0 <= duration <= 15.0:
+                            valid_data.append((wav_path, raw_text, speaker_id, duration))
+                    except Exception:
+                        pass
     
     print(f" -> 총 {len(valid_data)}개의 유효한 검증 데이터를 찾았습니다.")
+
+    # 레퍼런스 매칭 (동일 화자 매칭: 같은 화자의 다른 문장을 레퍼런스로 할당)
+    speaker_dict = {}
+    for item in valid_data:
+        wav_path = item[0]
+        # 메타데이터의 4번째 열(index 3)이 화자 ID (예: N35/99C9_GCVR8U39B9_B3N)
+        speaker_id = item[2] 
+        
+        if speaker_id not in speaker_dict:
+            speaker_dict[speaker_id] = []
+        speaker_dict[speaker_id].append(item)
+
+    reference_mapping = {}
+    for item in valid_data:
+        wav_path = item[0]
+        speaker_id = item[2]
+        
+        speaker_items = speaker_dict[speaker_id]
+        
+        # 화자의 문장이 2개 이상이면 자기 자신이 아닌 다른 문장을 선택
+        if len(speaker_items) > 1:
+            candidates = [x for x in speaker_items if x[0] != wav_path]
+            # 재현성을 위해 리스트의 첫 번째 항목 선택
+            reference_mapping[wav_path] = candidates[0] 
+        else:
+            # 화자의 문장이 1개뿐이면 어쩔 수 없이 자기 자신을 레퍼런스로 사용
+            reference_mapping[wav_path] = item
 
     print("\n2. 모델 및 보코더 로딩 중...")
     model_cfg = OmegaConf.load(config_path)
@@ -53,19 +92,21 @@ def main():
         mel_spec_type=model_cfg.model.mel_spec.mel_spec_type,
         vocab_file=vocab_path,
         device=device,
-        tokenizer="custom",
+        tokenizer="kor_grapheme",
         use_n2gk_plus=True
     )
 
     # 평가할 샘플 무작위 추출
+    if len(valid_data) < args.num_samples:
+        print(f"⚠️ 경고: 10~15초 조건을 만족하는 데이터가 {len(valid_data)}개뿐입니다. 모두 평가합니다.")
     eval_samples = random.sample(valid_data, min(args.num_samples, len(valid_data)))
     
     print(f"\n3. {len(eval_samples)}개 문장에 대한 추론 시작...")
-    for i, (target_wav, target_text) in enumerate(eval_samples):
-        # 목소리 복제의 기준(Reference)이 될 오디오를 검증셋에서 무작위로 하나 선택
-        ref_wav, ref_text = random.choice(valid_data)
+    for i, (target_wav, target_text, target_speaker, target_duration) in enumerate(eval_samples):
+        # 동일 화자로 매칭된 레퍼런스 오디오 가져오기
+        ref_wav, ref_text, ref_speaker, ref_duration = reference_mapping[target_wav]
         
-        print(f"[{i+1}/{len(eval_samples)}] 생성 중: {target_text[:30]}...")
+        print(f"[{i+1}/{len(eval_samples)}] 생성 중: {target_text[:30]}... (Ref: {ref_duration:.1f}s, Target: {target_duration:.1f}s)")
         
         # 레퍼런스 오디오 전처리
         ref_audio_pre, ref_text_pre = preprocess_ref_audio_text(ref_wav, ref_text, show_info=lambda x: None)
