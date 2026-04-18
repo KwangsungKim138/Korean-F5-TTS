@@ -20,7 +20,7 @@ optim:
   epochs: 10000
   learning_rate: 1e-5
   num_warmup_updates: 1000
-  grad_accumulation_steps: 1
+  grad_accumulation_steps: 12
   max_grad_norm: 1.0
   bnb_optimizer: False
 
